@@ -27,27 +27,28 @@ class KindleTextRenderer:
         return "\n".join(lines) + "\n"
 
     def render_layout(self, snapshot: CodexStatusSnapshot) -> str:
-        """Return tab-separated FBInk blocks: size, column, pixel-top, text."""
+        """Return FBInk blocks: size, column, top, left, renderer, text."""
         status_counts = {
             status: sum(session.state == status for project in snapshot.projects for session in project.sessions)
             for status in ("RUN", "DONE", "STAL", "ABRT", "IDLE")
         }
         status_summary = " / ".join(f"{count} {status}" for status, count in status_counts.items() if count)
         blocks = [
-            (3, 1, 35, 0, f"CODEX STATUS / {snapshot.generated_at.astimezone().strftime('%H:%M')}"),
+            (3, 1, 35, 0, "bitmap", f"CODEX STATUS / {snapshot.generated_at.astimezone().strftime('%H:%M')}"),
             (
                 2,
                 1,
                 70,
                 8,
+                "bitmap",
                 status_summary.replace(" RUN", "R").replace(" DONE", "D").replace(" STAL", "S").replace(" ABRT", "A").replace(" IDLE", "I"),
             ),
-            (2, 1, 98, 8, f"{'TASK':<8} {'MODEL':<14} {'S':<1} {'CTX':>4} {'TOK':>7} {'C L/T':>7}"),
-            (2, 1, 119, 8, "----------------------------------------"),
+            (2, 1, 98, 8, "bitmap", f"{'TASK':<8} {'MODEL':<14} {'S':<1} {'CTX':>4} {'TOK':>7} {'C L/T':>7}"),
+            (2, 1, 119, 8, "bitmap", "----------------------------------------"),
         ]
         top = 145
         for project in snapshot.projects[:3]:
-            blocks.append((3, 1, top, 0, self._clip(self._project_label(project.name), 25)))
+            blocks.append((3, 1, top, 0, "cjk_heading", self._clip(project.name, 25)))
             top += 38
             for session in project.sessions[:3]:
                 metrics = session.metrics
@@ -55,13 +56,15 @@ class KindleTextRenderer:
                 context = f"{metrics.context_percent}%"
                 token_total = self._tokens(metrics.total_tokens)
                 cache = f"{metrics.cache_last_percent}/{metrics.cache_total_percent}"
-                row = f"{title} {self._model_label(session.model):<14} {self._state_label(session.state)} {context:>4} {token_total:>7} {cache:>7}"
-                blocks.append((2, 1, top, 8, row))
+                # The title occupies the original eight-character column; metrics stay bitmap-aligned.
+                row = f"{' ':8} {self._model_label(session.model):<14} {self._state_label(session.state)} {context:>4} {token_total:>7} {cache:>7}"
+                blocks.append((2, 1, top, 8, "bitmap", row))
+                blocks.append((2, 1, top, 8, "cjk_row", title.rstrip()))
                 top += 27
             top += 50
         return "\n".join(
-            f"{size}\t{column}\t{pixel_top}\t{pixel_left}\t{text}"
-            for size, column, pixel_top, pixel_left, text in blocks
+            f"{size}\t{column}\t{pixel_top}\t{pixel_left}\t{renderer}\t{text}"
+            for size, column, pixel_top, pixel_left, renderer, text in blocks
         ) + "\n"
 
     def _clip(self, value: str, width: int | None = None) -> str:
@@ -69,17 +72,17 @@ class KindleTextRenderer:
         value = " ".join(value.split())
         if self._width(value) <= width:
             return value
-        if width <= 3:
-            return "." * width
+        if width <= 1:
+            return "."
         kept: list[str] = []
         used = 0
         for char in value:
             char_width = 2 if unicodedata.east_asian_width(char) in "WF" else 1
-            if used + char_width > width - 3:
+            if used + char_width > width - 1:
                 break
             kept.append(char)
             used += char_width
-        return "".join(kept) + "..."
+        return "".join(kept) + "."
 
     def _pad(self, value: str, width: int) -> str:
         return value + " " * max(0, width - self._width(value))
@@ -96,18 +99,8 @@ class KindleTextRenderer:
 
     @staticmethod
     def _display_title(title: str, session_id: str) -> str:
-        # The verified FBInk font is ASCII-only, while source titles stay Unicode in the snapshot.
-        ascii_title = "".join(char if char.isascii() and char.isprintable() else " " for char in title).split()
-        return " ".join(ascii_title) or f"session-{session_id[-6:]}"
-
-    @staticmethod
-    def _project_label(name: str) -> str:
-        aliases = {
-            "KindleDisplay": "KINDLE DISPLAY",
-            "DailyAI": "DAILY AI",
-            "ai-composition-correction": "AI COMPOSITION",
-        }
-        return aliases.get(name, " ".join(name.replace("-", " ").replace("_", " ").upper().split()))
+        printable_title = "".join(char if char.isprintable() else " " for char in title).split()
+        return " ".join(printable_title) or f"session-{session_id[-6:]}"
 
     @staticmethod
     def _model_label(model: str) -> str:
@@ -130,4 +123,4 @@ class KindleTextRenderer:
 
     @staticmethod
     def _clip_static(value: str, width: int) -> str:
-        return value if len(value) <= width else value[: width - 3] + "..."
+        return value if len(value) <= width else value[: width - 1] + "."

@@ -72,7 +72,21 @@ Expected result:
 FBInk-ready
 ```
 
-## 6. Persist Local Settings
+## 6. Install The Chinese Font
+
+The dashboard keeps its metric table in the compact bitmap font, but renders
+project and session titles with the macOS Chinese font. Copy it once to the
+Kindle user partition:
+
+```sh
+ssh -i "$HOME/.ssh/kindle_display_ed25519" -o BatchMode=yes \
+  root@192.168.15.244 'mkdir -p /mnt/us/fonts'
+scp -i "$HOME/.ssh/kindle_display_ed25519" \
+  '/System/Library/Fonts/STHeiti Medium.ttc' \
+  root@192.168.15.244:/mnt/us/fonts/STHeiti-Medium.ttc
+```
+
+## 7. Persist Local Settings
 
 Create a user-local configuration file:
 
@@ -95,7 +109,7 @@ source "$HOME/.config/kindle-display/env.zsh"
 
 `INTERVAL_SECONDS=300` checks every five minutes. The screen includes a clock, so each check changes the page and refreshes E-Ink.
 
-## 7. Run The Dashboard
+## 8. Run The Dashboard
 
 ```sh
 cd /path/to/KindleDisplay
@@ -113,4 +127,4 @@ cd /path/to/KindleDisplay
 | `ping` times out | RNDIS address | Set the actual RNDIS interface to `192.168.15.201/24`, not `169.254.*`. |
 | SSH permission denied | Kindle public key | Return to USB storage mode and re-check `usbnet/etc/authorized_keys`. |
 | Dashboard does not render | SSH and FBInk | Complete step 5, then run `./scripts/codex-dashboard.sh once`. |
-| Missing glyphs | Chinese titles | The default IBM bitmap font has no Chinese support; current rendering uses ASCII title fragments. |
+| Missing glyphs | Chinese project/session titles | Copy `STHeiti Medium.ttc` to `/mnt/us/fonts/STHeiti-Medium.ttc`; the dashboard uses it through FBInk TrueType rendering. |

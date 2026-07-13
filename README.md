@@ -73,8 +73,10 @@ three recent sessions in each. Override `INTERVAL_SECONDS`, `MAX_PROJECTS`, or
 `MAX_SESSIONS_PER_PROJECT` through environment
 variables. Session titles remain complete in the data snapshot; the Kindle
 renderer clips them only at the final 25-column layout boundary.
-The verified default FBInk font does not cover Chinese: Kindle output therefore
-uses the ASCII fragments of titles (or a short session ID when none exist).
+Project and session titles use the verified CJK TrueType font at
+`/mnt/us/fonts/STHeiti-Medium.ttc`; all metric columns keep the compact IBM
+bitmap font. Titles use the same fixed display widths as before and end in a
+single `.` when clipped.
 
 The sender assumes the verified K4 configuration from `wiki/`: USBNetwork is
 enabled, the host can reach `192.168.15.244`, and `/mnt/us/fbink` is installed.
