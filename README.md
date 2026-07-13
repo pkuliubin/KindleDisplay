@@ -2,6 +2,8 @@
 
 Low-frequency Codex session status for a Kindle 4 over USBNetwork.
 
+For a new Mac, follow [wiki/03-new-mac-setup.md](wiki/03-new-mac-setup.md).
+
 The Python package is split by responsibility:
 
 - `sources/`: local Codex state readers; currently `CodexLocalSource` joins
