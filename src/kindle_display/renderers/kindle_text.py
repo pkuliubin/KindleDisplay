@@ -6,7 +6,20 @@ from kindle_display.models import CodexStatusSnapshot
 
 
 class KindleTextRenderer:
-    """Render a compact fixed-width status page for the verified K4 layout."""
+    """Render a compact CJK monospaced table in one FBInk text block."""
+
+    TASK_WIDTH = 14
+    MODEL_WIDTH = 14
+    STATE_WIDTH = 5
+    CONTEXT_WIDTH = 4
+    TOKEN_WIDTH = 6
+    CACHE_WIDTH = 7
+    SESSION_TITLE_WIDTH = TASK_WIDTH - 2
+    PROJECT_TITLE_WIDTH = 28
+    # FBInk collapses ASCII and no-break spaces; figure space remains a glyph.
+    TABLE_SPACE = "\u2007"
+    TASK_MODEL_GAP = 4
+    MODEL_STATE_GAP = 4
 
     def __init__(self, width: int = 25) -> None:
         if width < 16:
@@ -27,45 +40,36 @@ class KindleTextRenderer:
         return "\n".join(lines) + "\n"
 
     def render_layout(self, snapshot: CodexStatusSnapshot) -> str:
-        """Return FBInk blocks: size, column, top, left, renderer, text."""
+        """Return one TrueType table block, using an ASCII-safe line separator."""
         status_counts = {
             status: sum(session.state == status for project in snapshot.projects for session in project.sessions)
             for status in ("RUN", "DONE", "STAL", "ABRT", "IDLE")
         }
-        status_summary = " / ".join(f"{count} {status}" for status, count in status_counts.items() if count)
-        blocks = [
-            (3, 1, 35, 0, "bitmap", f"CODEX STATUS / {snapshot.generated_at.astimezone().strftime('%H:%M')}"),
-            (
-                2,
-                1,
-                70,
-                8,
-                "bitmap",
-                status_summary.replace(" RUN", "R").replace(" DONE", "D").replace(" STAL", "S").replace(" ABRT", "A").replace(" IDLE", "I"),
-            ),
-            (2, 1, 98, 8, "bitmap", f"{'TASK':<8} {'MODEL':<14} {'S':<1} {'CTX':>4} {'TOK':>7} {'C L/T':>7}"),
-            (2, 1, 119, 8, "bitmap", "----------------------------------------"),
+        status_summary = " / ".join(
+            f"{count} {status}" for status, count in status_counts.items() if count
+        )
+        lines = [
+            f"CODEX STATUS / {snapshot.generated_at.astimezone().strftime('%H:%M')}",
+            status_summary,
+            self._table_row("TASK", "MODEL", "STATE", "CTX", "TOK", "C L/T"),
+            "-" * self._table_width(),
         ]
-        top = 145
         for project in snapshot.projects[:3]:
-            blocks.append((3, 1, top, 0, "cjk_heading", self._clip(project.name, 25)))
-            top += 38
+            if len(lines) > 4:
+                lines.append("")
+            lines.append(self._clip(project.name, self.PROJECT_TITLE_WIDTH))
             for session in project.sessions[:3]:
                 metrics = session.metrics
-                title = self._pad(self._clip(self._display_title(session.title, session.id), 8), 8)
+                title = "> " + self._clip_title(self._display_title(session.title, session.id), self.SESSION_TITLE_WIDTH)
                 context = f"{metrics.context_percent}%"
                 token_total = self._tokens(metrics.total_tokens)
                 cache = f"{metrics.cache_last_percent}/{metrics.cache_total_percent}"
-                # The title occupies the original eight-character column; metrics stay bitmap-aligned.
-                row = f"{' ':8} {self._model_label(session.model):<14} {self._state_label(session.state)} {context:>4} {token_total:>7} {cache:>7}"
-                blocks.append((2, 1, top, 8, "bitmap", row))
-                blocks.append((2, 1, top, 8, "cjk_row", title.rstrip()))
-                top += 27
-            top += 50
-        return "\n".join(
-            f"{size}\t{column}\t{pixel_top}\t{pixel_left}\t{renderer}\t{text}"
-            for size, column, pixel_top, pixel_left, renderer, text in blocks
-        ) + "\n"
+                lines.append(
+                    self._table_row(title, self._model_label(session.model), session.state, context, token_total, cache)
+                )
+        page = "\x1e".join(lines)
+        font_px = 26 if len(lines) <= 15 else 22
+        return f"{font_px}\t20\t20\t15\tttf_page\t{page}\n"
 
     def _clip(self, value: str, width: int | None = None) -> str:
         width = width or self.width
@@ -84,8 +88,47 @@ class KindleTextRenderer:
             used += char_width
         return "".join(kept) + "."
 
+    def _clip_title(self, value: str, width: int) -> str:
+        normalized = " ".join(value.split())
+        clipped = self._clip(normalized, width)
+        if self._width(normalized) > width:
+            clipped += "." * (width - self._width(clipped))
+        return clipped
+
     def _pad(self, value: str, width: int) -> str:
-        return value + " " * max(0, width - self._width(value))
+        return value + self.TABLE_SPACE * max(0, width - self._width(value))
+
+    def _table_row(self, task: str, model: str, state: str, context: str, tokens: str, cache: str) -> str:
+        task_gap = self.TABLE_SPACE * self.TASK_MODEL_GAP
+        return (
+            self._pad(task, self.TASK_WIDTH)
+            + task_gap
+            + self._pad(model, self.MODEL_WIDTH)
+            + self.TABLE_SPACE * self.MODEL_STATE_GAP
+            + self.TABLE_SPACE.join(
+                (
+                    self._pad(state, self.STATE_WIDTH),
+                    self._pad_left(context, self.CONTEXT_WIDTH),
+                    self._pad_left(tokens, self.TOKEN_WIDTH),
+                    self._pad_left(cache, self.CACHE_WIDTH),
+                )
+            )
+        )
+
+    def _pad_left(self, value: str, width: int) -> str:
+        return self.TABLE_SPACE * max(0, width - self._width(value)) + value
+
+    def _table_width(self) -> int:
+        return sum(
+            (
+                self.TASK_WIDTH,
+                self.MODEL_WIDTH,
+                self.STATE_WIDTH,
+                self.CONTEXT_WIDTH,
+                self.TOKEN_WIDTH,
+                self.CACHE_WIDTH,
+            )
+        ) + self.TASK_MODEL_GAP + self.MODEL_STATE_GAP + 3
 
     @staticmethod
     def _width(value: str) -> int:
@@ -93,6 +136,8 @@ class KindleTextRenderer:
 
     @staticmethod
     def _tokens(value: int) -> str:
+        if value >= 1_000_000_000:
+            return f"{value / 1_000_000_000:.1f}B"
         if value >= 1_000_000:
             return f"{value / 1_000_000:.1f}M"
         return f"{value // 1_000}k"

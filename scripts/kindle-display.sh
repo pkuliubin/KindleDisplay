@@ -3,7 +3,7 @@ set -euo pipefail
 
 KINDLE_HOST="${KINDLE_HOST:-192.168.15.244}"
 KINDLE_SSH_KEY="${KINDLE_SSH_KEY:-$(dirname "$0")/kindle_ed25519}"
-KINDLE_CJK_FONT="${KINDLE_CJK_FONT:-/mnt/us/fonts/STHeiti-Medium.ttc}"
+KINDLE_CJK_FONT="${KINDLE_CJK_FONT:-/mnt/us/fonts/SarasaMonoSC-Regular.ttf}"
 LAYOUT_MODE=0
 
 if [[ "${1:-}" == "--layout" ]]; then
@@ -29,33 +29,33 @@ if (( LAYOUT_MODE )); then
   REMOTE_COMMAND='echo "14 2" > /proc/eink_fb/update_display; '
   TAB=$(printf "\t")
   first=1
-  while IFS="$TAB" read -r size column pixel_top pixel_left renderer text; do
-    case "$size:$column:$pixel_top:$pixel_left" in
+  needs_refresh=0
+  while IFS="$TAB" read -r size pixel_top pixel_left pixel_right renderer text; do
+    case "$size:$pixel_top:$pixel_left:$pixel_right" in
       *[!0-9:]* | ::* | *::) echo "Invalid layout coordinates" >&2; exit 2 ;;
     esac
     case "$renderer" in
-      bitmap|cjk_heading|cjk_row) ;;
+      ttf|ttf_page) ;;
       *) echo "Invalid layout renderer: $renderer" >&2; exit 2 ;;
     esac
+    if [ "$renderer" = "ttf_page" ]; then
+      page_text="${text//$'\036'/$'\n'}"
+      REMOTE_COMMAND+="/mnt/us/fbink -q -f -c -t $(shell_quote "regular=${KINDLE_CJK_FONT},px=${size},top=${pixel_top},bottom=20,left=${pixel_left},right=${pixel_right},notrunc") -- $(shell_quote "$page_text"); "
+      first=0
+      continue
+    fi
     draw_flags=' -b'
     if [ "$first" -eq 1 ]; then
       draw_flags=' -c -b'
       first=0
     fi
-    case "$renderer" in
-      bitmap)
-        REMOTE_COMMAND+="/mnt/us/fbink -q${draw_flags} -S ${size} -x ${column} -X ${pixel_left} -y 0 -Y ${pixel_top} -- $(shell_quote "$text"); "
-        ;;
-      cjk_heading)
-        REMOTE_COMMAND+="/mnt/us/fbink -q${draw_flags} -t $(shell_quote "regular=${KINDLE_CJK_FONT},px=28,top=${pixel_top},bottom=0,left=25,right=25,notrunc") -- $(shell_quote "$text"); "
-        ;;
-      cjk_row)
-        REMOTE_COMMAND+="/mnt/us/fbink -q${draw_flags} -t $(shell_quote "regular=${KINDLE_CJK_FONT},px=18,top=${pixel_top},bottom=0,left=24,right=650,notrunc") -- $(shell_quote "$text"); "
-        ;;
-    esac
+    REMOTE_COMMAND+="/mnt/us/fbink -q${draw_flags} -t $(shell_quote "regular=${KINDLE_CJK_FONT},px=${size},top=${pixel_top},bottom=0,left=${pixel_left},right=${pixel_right},notrunc") -- $(shell_quote "$text"); "
+    needs_refresh=1
   done < "$LAYOUT_FILE"
   [ "$first" -eq 1 ] && exit 0
-  REMOTE_COMMAND+='/mnt/us/fbink -q -s; '
+  if [ "$needs_refresh" -eq 1 ]; then
+    REMOTE_COMMAND+='/mnt/us/fbink -q -s; '
+  fi
   ssh -n -i "$KINDLE_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 "root@$KINDLE_HOST" "$REMOTE_COMMAND"
 else
   if [[ $# -gt 0 ]]; then
