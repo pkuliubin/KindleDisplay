@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import unicodedata
+from decimal import Decimal
 
+from kindle_display.devices.layout_protocol import serialize_ttf_page
 from kindle_display.models import CodexStatusSnapshot
+from kindle_display.runtime.models import PageSpec
 
 
 class KindleTextRenderer:
@@ -34,13 +37,16 @@ class KindleTextRenderer:
             project_suffix = f" [{len(project.sessions)}]"
             lines.extend(["", self._clip(project.name, self.width - self._width(project_suffix)) + project_suffix])
             for session in project.sessions:
-                metrics = session.metrics
                 suffix = f" [{self._state_label(session.state)}]"
                 lines.append(self._clip(self._display_title(session.title, session.id), self.width - self._width(suffix)) + suffix)
         return "\n".join(lines) + "\n"
 
     def render_layout(self, snapshot: CodexStatusSnapshot) -> str:
         """Return one TrueType table block, using an ASCII-safe line separator."""
+        return serialize_ttf_page(self.render_page(snapshot))
+
+    def render_page(self, snapshot: CodexStatusSnapshot) -> PageSpec:
+        """Return one complete page without transport-specific TSV encoding."""
         status_counts = {
             status: sum(session.state == status for project in snapshot.projects for session in project.sessions)
             for status in ("RUN", "DONE", "STAL", "ABRT", "IDLE")
@@ -52,14 +58,15 @@ class KindleTextRenderer:
         if status_summary:
             header += f" / {status_summary}"
         lines = [header, *self._model_summary_lines(snapshot)]
+        lines.append("")
         lines.extend(
             (
                 self._table_row("TASK", "MODEL", "STA", "CTX", "TOK", "C L/T"),
                 "-" * self._table_width(),
             )
         )
-        for project in snapshot.projects[:3]:
-            if len(lines) > 4:
+        for project_index, project in enumerate(snapshot.projects[:3]):
+            if project_index:
                 lines.append("")
             lines.append(self._clip(project.name, self.PROJECT_TITLE_WIDTH))
             for session in project.sessions[:3]:
@@ -78,9 +85,17 @@ class KindleTextRenderer:
                         cache,
                     )
                 )
-        page = "\x1e".join(lines)
         font_px = 26 if len(lines) <= 15 else 22
-        return f"{font_px}\t20\t20\t15\tttf_page\t{page}\n"
+        return PageSpec(
+            page_id="codex:0",
+            text="\n".join(lines),
+            font_role="cjk_mono",
+            font_px=font_px,
+            top=20,
+            left=20,
+            right=15,
+            bottom=20,
+        )
 
     def _clip(self, value: str, width: int | None = None) -> str:
         width = width or self.width
@@ -183,21 +198,29 @@ class KindleTextRenderer:
         return KindleTextRenderer._clip_static(model, 18)
 
     def _model_summary_lines(self, snapshot: CodexStatusSnapshot) -> list[str]:
-        prefix = ""
         if not snapshot.daily_model_tokens:
             return ["no token usage"]
-        lines: list[str] = []
-        line = prefix
-        for usage in snapshot.daily_model_tokens:
-            entry = f"{self._model_summary_label(usage.model)} {self._tokens(usage.today_tokens)}"
-            separator = "" if line == prefix else " / "
-            if self._width(line + separator + entry) > self._table_width() and line != prefix:
-                lines.append(line)
-                line = entry
-            else:
-                line += separator + entry
-        lines.append(line)
-        return lines
+        return [
+            self.TABLE_SPACE.join(
+                (
+                    self._pad(self._model_summary_label(usage.model), 14),
+                    self._pad_left(self._tokens(usage.today_tokens), 6),
+                    self._pad_left(f"{usage.output_token_rate:.1%}", 5),
+                    self._pad_left(self._usd(usage.estimated_cost_usd), 8),
+                )
+            )
+            for usage in snapshot.daily_model_tokens
+        ]
+
+    @staticmethod
+    def _usd(value: Decimal | None) -> str:
+        if value is None:
+            return ""
+        if value >= 1:
+            return f"${value:.2f}"
+        if value >= 0.01:
+            return f"${value:.3f}"
+        return f"${value:.4f}"
 
     @staticmethod
     def _state_label(state: str) -> str:

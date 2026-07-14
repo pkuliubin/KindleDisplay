@@ -14,6 +14,7 @@ from kindle_display.models import (
     SessionMetrics,
     SessionSnapshot,
 )
+from kindle_display.sources.codex_pricing import CodexPricing
 
 
 class CodexLocalSource:
@@ -21,27 +22,41 @@ class CodexLocalSource:
 
     DAILY_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
-    def __init__(self, codex_home: Path | None = None, stale_minutes: int = 5) -> None:
+    def __init__(
+        self, codex_home: Path | None = None, stale_minutes: int = 5, pricing_path: Path | None = None
+    ) -> None:
         self.codex_home = codex_home or Path.home() / ".codex"
         self.stale_minutes = stale_minutes
+        default_pricing = Path(__file__).resolve().parents[3] / "config" / "codex-pricing.toml"
+        self.pricing = CodexPricing.from_toml(pricing_path or default_pricing)
 
     def collect(self, session_date: dt.date, now: dt.datetime | None = None) -> CodexCollectionSnapshot:
         now = now or dt.datetime.now(dt.timezone.utc)
         threads = self._load_threads()
         sessions: list[SessionSnapshot] = []
-        daily_model_tokens: Counter[str] = Counter()
+        daily_model_tokens: dict[str, Counter[str]] = {}
 
         for path in self._rollouts_updated_on(session_date):
             session, model_tokens = self._read_rollout(path, threads, now, session_date)
-            daily_model_tokens.update(model_tokens)
+            for model, usage in model_tokens.items():
+                daily_model_tokens.setdefault(model, Counter()).update(usage)
             if session is not None:
                 sessions.append(session)
 
         return CodexCollectionSnapshot(
             sessions=tuple(sorted(sessions, key=lambda session: session.last_event_at, reverse=True)),
             daily_model_tokens=tuple(
-                ModelTokenUsage(model=model, today_tokens=tokens)
-                for model, tokens in sorted(daily_model_tokens.items(), key=lambda item: (-item[1], item[0]))
+                ModelTokenUsage(
+                    model=model,
+                    today_tokens=usage["total_tokens"],
+                    input_tokens=usage["input_tokens"],
+                    cached_input_tokens=usage["cached_input_tokens"],
+                    output_tokens=usage["output_tokens"],
+                    estimated_cost_usd=self._estimate_cost(model, usage),
+                )
+                for model, usage in sorted(
+                    daily_model_tokens.items(), key=lambda item: (-item[1]["total_tokens"], item[0])
+                )
             ),
         )
 
@@ -77,7 +92,7 @@ class CodexLocalSource:
 
     def _read_rollout(
         self, path: Path, threads: dict[str, dict[str, Any]], now: dt.datetime, session_date: dt.date
-    ) -> tuple[SessionSnapshot | None, Counter[str]]:
+    ) -> tuple[SessionSnapshot | None, dict[str, Counter[str]]]:
         session_id = path.stem[-36:]
         metadata: dict[str, Any] = {}
         latest_event_at: dt.datetime | None = None
@@ -85,9 +100,9 @@ class CodexLocalSource:
         latest_lifecycle: str | None = None
         current_model = "unknown"
         latest_model = "unknown"
-        previous_total: int | None = None
+        previous_usage: dict[str, int] | None = None
         today_tokens = 0
-        daily_model_tokens: Counter[str] = Counter()
+        daily_model_tokens: dict[str, Counter[str]] = {}
 
         try:
             with path.open(encoding="utf-8") as source:
@@ -126,20 +141,23 @@ class CodexLocalSource:
                     if not isinstance(info, dict):
                         continue
                     try:
-                        metrics = self._metrics_from_token_event(info, today_tokens=0)
-                    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+                        current_usage = self._total_usage_from_token_event(info)
+                    except (KeyError, TypeError, ValueError):
                         continue
 
-                    current_total = metrics.total_tokens
-                    delta = current_total if previous_total is None else current_total - previous_total
+                    delta = (
+                        current_usage
+                        if previous_usage is None
+                        else {field: current_usage[field] - previous_usage[field] for field in current_usage}
+                    )
                     # A reset or corrupted event starts a fresh cumulative baseline.
-                    if delta >= 0 and timestamp.astimezone(self.DAILY_TIMEZONE).date() == session_date:
-                        today_tokens += delta
-                        daily_model_tokens[current_model] += delta
-                    previous_total = current_total
+                    if all(value >= 0 for value in delta.values()) and timestamp.astimezone(self.DAILY_TIMEZONE).date() == session_date:
+                        today_tokens += delta["total_tokens"]
+                        daily_model_tokens.setdefault(current_model, Counter()).update(delta)
+                    previous_usage = current_usage
                     latest_token = info
         except OSError:
-            return None, Counter()
+            return None, {}
 
         if not metadata or latest_event_at is None or latest_token is None:
             return None, daily_model_tokens
@@ -168,6 +186,16 @@ class CodexLocalSource:
             daily_model_tokens,
         )
 
+    def _estimate_cost(self, model: str, usage: Counter[str]):
+        pricing = self.pricing.get(model)
+        if pricing is None:
+            return None
+        return pricing.estimate_cost(
+            input_tokens=usage["input_tokens"],
+            cached_input_tokens=usage["cached_input_tokens"],
+            output_tokens=usage["output_tokens"],
+        )
+
     @staticmethod
     def _model_from_event(event: dict[str, Any], payload: dict[str, Any]) -> str | None:
         if event.get("type") == "turn_context":
@@ -186,6 +214,22 @@ class CodexLocalSource:
             return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
+
+    @staticmethod
+    def _total_usage_from_token_event(info: dict[str, Any]) -> dict[str, int]:
+        total_usage = info["total_token_usage"]
+        input_tokens = int(total_usage["input_tokens"])
+        total_tokens = int(total_usage["total_tokens"])
+        output_tokens = int(total_usage.get("output_tokens", total_tokens - input_tokens))
+        cached_input_tokens = int(total_usage["cached_input_tokens"])
+        if cached_input_tokens > input_tokens or total_tokens != input_tokens + output_tokens:
+            raise ValueError("invalid total token usage")
+        return {
+            "input_tokens": input_tokens,
+            "cached_input_tokens": cached_input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+        }
 
     @staticmethod
     def _metrics_from_token_event(info: dict[str, Any], *, today_tokens: int) -> SessionMetrics:

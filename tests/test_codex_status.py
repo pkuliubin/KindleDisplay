@@ -55,6 +55,13 @@ class CodexStatusTest(unittest.TestCase):
         self.assertIn("阅读 wiki", layout)
         self.assertIn("STA", layout)
         self.assertIn("1k/1k", layout)
+        self.assertIn("unknown", layout)
+        self.assertIn("1.0%", layout)
+        self.assertNotIn("$", layout)
+        page = KindleTextRenderer().render_page(snapshot)
+        self.assertEqual(page.page_id, "codex:0")
+        self.assertIn("\n", page.text)
+        self.assertNotIn("\x1e", page.text)
         self.assertEqual(KindleTextRenderer()._clip("123456789", 8), "1234567.")
         self.assertEqual(KindleTextRenderer()._clip_title("这篇文章讲了什么", 12), "这篇文章讲..")
         self.assertEqual(KindleTextRenderer()._width(KindleTextRenderer()._clip_title("这篇文章讲了什么", 12)), 12)
@@ -141,9 +148,23 @@ class CodexStatusTest(unittest.TestCase):
             [("gpt-5.6-terra", 200), ("gpt-5.6-sol", 70)],
         )
         data = snapshot.as_dict()
-        self.assertEqual(data["daily_model_tokens"][0], {"model": "gpt-5.6-terra", "today_tokens": 200})
+        self.assertEqual(
+            data["daily_model_tokens"][0],
+            {
+                "model": "gpt-5.6-terra",
+                "today_tokens": 200,
+                "input_tokens": 200,
+                "cached_input_tokens": 0,
+                "output_tokens": 0,
+                "output_token_rate": 0.0,
+                "estimated_cost_usd": 0.0005,
+            },
+        )
         layout = KindleTextRenderer().render_layout(snapshot)
-        self.assertIn("gpt-5.6-terra 200 / gpt-5.6-sol 70", layout)
+        self.assertIn("gpt-5.6-terra", layout)
+        self.assertIn("$0.0005", layout)
+        self.assertIn("gpt-5.6-sol", layout)
+        self.assertIn("$0.0006", layout)
 
     @staticmethod
     def _token_event(timestamp: str, total_tokens: int) -> dict[str, object]:

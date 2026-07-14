@@ -96,3 +96,19 @@ TASK  MODEL  STA CTX    TOK   C L/T
 6. 渲染断言覆盖 `STA`、`R/D/I`、`today/total` 与顶部模型汇总，并检查一页的字号和行数仍满足 Kindle 布局约束。
 
 完成前用真实 `~/.codex/sessions` 样本做一次只读核对：同一日的 session 合计应等于按模型合计；对模型切换前后分别抽查一段 rollout 的 `thread_settings_applied`、`turn_context` 和 `token_count` 时间序列。
+
+## 7. 名义价格估算
+
+定价表放在 `config/codex-pricing.toml`，金额单位为 USD / 1M tokens。每个模型保留 short-context、long-context 和 cache-write 价格，方便价格调整和未来增加完整计费字段；当前日志没有 cache-write token，也无法按请求可靠判断 long-context，第一版只使用 short-context 的 input、cached-input 和 output 单价。
+
+每个模型的日估算为：
+
+```text
+(input_tokens - cached_input_tokens) * input_rate
++ cached_input_tokens * cached_input_rate
++ output_tokens * output_rate
+```
+
+结果标为名义估算，不包含 cache write 和 long-context 调整。`reasoning_output_tokens` 是 `output_tokens` 的子集，不能再次计价。找不到模型价格配置时，`estimated_cost_usd` 为 `null`，Kindle 模型行不显示美元金额。
+
+每个模型独占一行，按固定列宽展示 `{model} {TOK} {output_token_rate} {price美元}`，使多个模型的数值上下对齐；其中 `output_token_rate = output_tokens / total_tokens`。

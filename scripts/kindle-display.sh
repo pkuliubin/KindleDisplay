@@ -4,12 +4,32 @@ set -euo pipefail
 KINDLE_HOST="${KINDLE_HOST:-192.168.15.244}"
 KINDLE_SSH_KEY="${KINDLE_SSH_KEY:-$(dirname "$0")/kindle_ed25519}"
 KINDLE_CJK_FONT="${KINDLE_CJK_FONT:-/mnt/us/fonts/SarasaMonoSC-Regular.ttf}"
+KINDLE_CONNECT_TIMEOUT="${KINDLE_CONNECT_TIMEOUT:-5}"
 LAYOUT_MODE=0
+REFRESH_PROFILE="${KINDLE_REFRESH_PROFILE:-flash_clean}"
 
-if [[ "${1:-}" == "--layout" ]]; then
-  LAYOUT_MODE=1
-  shift
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --layout)
+      LAYOUT_MODE=1
+      shift
+      ;;
+    --refresh-profile)
+      [[ $# -ge 2 ]] || { echo "Missing value for --refresh-profile" >&2; exit 2; }
+      REFRESH_PROFILE="$2"
+      shift 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+case "$REFRESH_PROFILE" in
+  clean) PAGE_REFRESH_FLAGS='-q -c' ;;
+  flash_clean) PAGE_REFRESH_FLAGS='-q -f -c' ;;
+  *) echo "Unknown refresh profile: $REFRESH_PROFILE" >&2; exit 2 ;;
+esac
 
 if [[ ! -r "$KINDLE_SSH_KEY" ]]; then
   echo "Kindle SSH key is not readable: $KINDLE_SSH_KEY" >&2
@@ -40,7 +60,7 @@ if (( LAYOUT_MODE )); then
     esac
     if [ "$renderer" = "ttf_page" ]; then
       page_text="${text//$'\036'/$'\n'}"
-      REMOTE_COMMAND+="/mnt/us/fbink -q -f -c -t $(shell_quote "regular=${KINDLE_CJK_FONT},px=${size},top=${pixel_top},bottom=20,left=${pixel_left},right=${pixel_right},notrunc") -- $(shell_quote "$page_text"); "
+      REMOTE_COMMAND+="/mnt/us/fbink ${PAGE_REFRESH_FLAGS} -t $(shell_quote "regular=${KINDLE_CJK_FONT},px=${size},top=${pixel_top},bottom=20,left=${pixel_left},right=${pixel_right},notrunc") -- $(shell_quote "$page_text"); "
       first=0
       continue
     fi
@@ -56,12 +76,12 @@ if (( LAYOUT_MODE )); then
   if [ "$needs_refresh" -eq 1 ]; then
     REMOTE_COMMAND+='/mnt/us/fbink -q -s; '
   fi
-  ssh -n -i "$KINDLE_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 "root@$KINDLE_HOST" "$REMOTE_COMMAND"
+  ssh -n -i "$KINDLE_SSH_KEY" -o BatchMode=yes -o ConnectTimeout="$KINDLE_CONNECT_TIMEOUT" "root@$KINDLE_HOST" "$REMOTE_COMMAND"
 else
   if [[ $# -gt 0 ]]; then
     printf '%s' "$1"
   else
     cat
-  fi | ssh -i "$KINDLE_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 "root@$KINDLE_HOST" \
+  fi | ssh -i "$KINDLE_SSH_KEY" -o BatchMode=yes -o ConnectTimeout="$KINDLE_CONNECT_TIMEOUT" "root@$KINDLE_HOST" \
     'cat > /tmp/kindle-display.txt; echo "14 2" > /proc/eink_fb/update_display; /mnt/us/fbink -q -c -S 3 -x 1 -y 1 "$(cat /tmp/kindle-display.txt)"'
 fi

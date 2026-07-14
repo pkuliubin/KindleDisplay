@@ -31,8 +31,13 @@ def main() -> int:
         print(json.dumps(snapshot.as_dict(), ensure_ascii=False, indent=2))
     elif args.usage:
         print(f"TODAY TOKENS / {snapshot.session_date.isoformat()}")
+        print("MODEL\tTOK\tOUTPUT\tRATE\tUSD")
         for usage in snapshot.daily_model_tokens:
-            print(f"{usage.model}\t{usage.today_tokens}")
+            estimated_cost = "" if usage.estimated_cost_usd is None else f"{usage.estimated_cost_usd:.4f}"
+            print(
+                f"{usage.model}\t{usage.today_tokens}\t{usage.output_tokens}\t"
+                f"{usage.output_token_rate:.1%}\t{estimated_cost}"
+            )
         print("DISPLAYED SESSIONS")
         for project in snapshot.projects:
             for session in project.sessions:

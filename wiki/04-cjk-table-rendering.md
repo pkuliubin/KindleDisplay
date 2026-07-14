@@ -7,7 +7,7 @@
 - 完整中英文显示，不依赖 Mac 的系统字体或当前内容生成临时字库；
 - 固定表格列稳定对齐；
 - 每页只调用一次 FBInk TrueType 文本渲染；
-- 每页只触发一次 E-Ink 完整刷新；
+- 每页只触发一次 E-Ink 刷新；
 - 状态页具有足够大的字号，并能清除历史残影。
 
 当前已验证的方案是：Kindle 常驻完整的 `Sarasa Mono SC` 等宽字体，Mac 生成一段定宽多行文本，发送器将整段文本交给一次 `fbink -t` 调用。
@@ -49,12 +49,12 @@ KINDLE_SSH_KEY="$HOME/.ssh/kindle_display_ed25519" \
 | --- | ---: | --- |
 | `TASK` | 14 | 左对齐，包含 `> ` 前缀 |
 | `MODEL` | 14 | 左对齐，完整显示 `gpt-5.6-terra` |
-| `STATE` | 5 | 左对齐，显示完整状态 |
+| `STA` | 3 | 左对齐，显示 `R/D/S/A/I` |
 | `CTX` | 4 | 右对齐 |
-| `TOK` | 6 | 右对齐 |
+| `TOK` | 12 | 右对齐，显示 `today/lifetime` |
 | `C L/T` | 7 | 右对齐 |
 
-`TASK -> MODEL` 与 `MODEL -> STATE` 均使用 4 个半格间距；其余列使用 1 个半格间距。当前完整状态为 `RUN`、`DONE`、`STAL`、`ABRT`、`IDLE`。顶部汇总显示完整名称，例如 `1 RUN / 4 DONE`。
+`TASK -> MODEL` 与 `MODEL -> STA` 均使用 2 个半格间距；其余列使用 1 个半格间距。状态使用 `R`、`D`、`S`、`A`、`I`。顶部按模型分行显示今日 token、输出 token 比例和名义价格估算；具体业务字段以 `wiki/06-codex-daily-token-usage-design.md` 为准。
 
 ### 标题截断
 
@@ -99,13 +99,13 @@ font_px<TAB>top<TAB>left<TAB>right<TAB>ttf_page<TAB>page_text
 `page_text` 的逻辑换行用 ASCII `U+001E` 分隔，发送器在本机组装远端命令前将其还原为真实换行。这样 TSV 仍是一条完整记录，Kindle 上只执行一次：
 
 ```sh
-/mnt/us/fbink -q -f -c -t \
+/mnt/us/fbink -q <refresh-profile-flags> -t \
   regular=/mnt/us/fonts/SarasaMonoSC-Regular.ttf,px=26,... \
   -- "<whole page>"
 ```
 
-- `-c`：清整页；
-- `-f`：请求黑闪式完整刷新，解决电子墨水历史残影；
+- `clean -> -c`：已验证的普通换页 profile，无全屏黑闪，表现为淡入淡出并允许少量残影；
+- `flash_clean -> -f -c`：已验证的黑闪式完整刷新，用于启动、重连和周期清残影；
 - `-q`：避免无用日志；
 - `notrunc`：内容越界应明确失败，不要静默截掉右侧列。
 
@@ -120,7 +120,7 @@ font_px<TAB>top<TAB>left<TAB>right<TAB>ttf_page<TAB>page_text
 | 按当前标题裁剪 18KB 字体 | 新 session 的新汉字会缺字 | 不采用；字体覆盖必须与展示内容无关。 |
 | 比例字体配 ASCII 空格表格 | 列难以稳定对齐 | 不采用；使用 1:2 等宽 CJK 字体。 |
 | 截断后只保证 `<=` 宽度 | 中文标题后多出可见空隙 | 已截断标题必须补到精确字段宽度。 |
-| 只用 `-c` 清屏 | 旧大字残影保留 | 当前完整状态页使用 `-f -c`。 |
+| 只用 `-c` 清屏 | 可能保留少量残影 | 仅作为普通换页 profile；按照设备级周期使用 `-f -c` 清除。 |
 | `-c -s` 当作纯清屏 | `-s` 改写行为，未真正清空 | 纯清屏诊断使用 `fbink -k`。 |
 | 多次 SSH/远端循环传布局 | 曾出现画完又清空的空白页 | 在 Mac 端将命令安全引用后一次 SSH 发送。 |
 
@@ -129,7 +129,7 @@ font_px<TAB>top<TAB>left<TAB>right<TAB>ttf_page<TAB>page_text
 1. 在 Mac 端完成采集、归一化、排序和字符串格式化；Kindle 不执行业务逻辑。
 2. 复用 `KindleTextRenderer` 的显示单位、填充和截断规则，或基于它创建场景专属 renderer。
 3. 一个完整页面只产生一条 `ttf_page` 记录。
-4. 先运行 `./scripts/codex-dashboard.sh --print` 检查逻辑文本；再运行 `once` 真机检查列对齐、底部边界和残影。
+4. 先运行 `./scripts/kindle-dashboard.sh preview --task <id> --format text` 检查逻辑文本；再运行 `once --task <id> --page <n>` 真机检查列对齐、底部边界和残影。
 5. 内容量接近最大行数时，专门验证字号回落后的布局，不要只用少量 session 页面验收。
 
 USBNetwork、SSH key、字体安装与重新连接后的 Mac RNDIS 地址修复，见 `wiki/03-new-mac-setup.md`。

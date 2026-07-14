@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUN_DIR="${KINDLE_DISPLAY_RUN_DIR:-/tmp/kindle-display}"
 PID_FILE="$RUN_DIR/codex-dashboard.pid"
+UNIFIED_PID_FILE="$RUN_DIR/kindle-dashboard.pid"
 LOG_FILE="$RUN_DIR/codex-dashboard.log"
 KEY_PATH="${KINDLE_SSH_KEY:-$SCRIPT_DIR/kindle_ed25519}"
 
@@ -21,6 +22,10 @@ render_layout() {
 
 start_dashboard() {
   mkdir -p "$RUN_DIR"
+  if [[ -r "$UNIFIED_PID_FILE" ]] && kill -0 "$(<"$UNIFIED_PID_FILE")" 2>/dev/null; then
+    echo "Unified Kindle dashboard is running (PID $(<"$UNIFIED_PID_FILE")). Stop it before starting the legacy dashboard." >&2
+    return 1
+  fi
   if [[ -r "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     echo "Dashboard already running (PID $(cat "$PID_FILE"))."
     return 0

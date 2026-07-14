@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from datetime import date, datetime
 from typing import Any
 
@@ -46,6 +47,14 @@ class ProjectSnapshot:
 class ModelTokenUsage:
     model: str
     today_tokens: int
+    input_tokens: int
+    cached_input_tokens: int
+    output_tokens: int
+    estimated_cost_usd: Decimal | None
+
+    @property
+    def output_token_rate(self) -> float:
+        return self.output_tokens / self.today_tokens if self.today_tokens else 0.0
 
 
 @dataclass(frozen=True)
@@ -74,7 +83,17 @@ class CodexStatusSnapshot:
             "project_count": len(self.projects),
             "session_count": self.session_count,
             "daily_model_tokens": [
-                {"model": usage.model, "today_tokens": usage.today_tokens}
+                {
+                    "model": usage.model,
+                    "today_tokens": usage.today_tokens,
+                    "input_tokens": usage.input_tokens,
+                    "cached_input_tokens": usage.cached_input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "output_token_rate": usage.output_token_rate,
+                    "estimated_cost_usd": float(usage.estimated_cost_usd)
+                    if usage.estimated_cost_usd is not None
+                    else None,
+                }
                 for usage in self.daily_model_tokens
             ],
             "projects": [
