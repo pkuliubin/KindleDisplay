@@ -47,12 +47,14 @@ class CodexStatusTest(unittest.TestCase):
         self.assertIn("26\t20\t20\t15\tttf_page\tCODEX STATUS", KindleTextRenderer().render_layout(snapshot))
         rendered = KindleTextRenderer().render(snapshot)
         self.assertIn("KindleDisplay [1]", rendered)
-        self.assertIn("wiki [RUN]", rendered)
+        self.assertIn("wiki [R]", rendered)
         layout = KindleTextRenderer().render_layout(snapshot)
         self.assertIn("KindleDisplay", layout)
         self.assertIn("> 阅读 wiki", layout)
         self.assertIn("gpt-test", layout)
         self.assertIn("阅读 wiki", layout)
+        self.assertIn("STA", layout)
+        self.assertIn("1k/1k", layout)
         self.assertEqual(KindleTextRenderer()._clip("123456789", 8), "1234567.")
         self.assertEqual(KindleTextRenderer()._clip_title("这篇文章讲了什么", 12), "这篇文章讲..")
         self.assertEqual(KindleTextRenderer()._width(KindleTextRenderer()._clip_title("这篇文章讲了什么", 12)), 12)
@@ -84,9 +86,84 @@ class CodexStatusTest(unittest.TestCase):
             os.utime(log_path, (timestamp, timestamp))
 
             now = dt.datetime(2026, 7, 14, 6, 3, tzinfo=dt.timezone.utc)
-            sessions = CodexLocalSource(home).collect(dt.date(2026, 7, 14), now)
+            collection = CodexLocalSource(home).collect(dt.date(2026, 7, 14), now)
 
-        self.assertEqual(len(sessions), 1)
-        self.assertEqual(sessions[0].id, "session-old")
-        self.assertEqual(sessions[0].project_name, "ResumedProject")
-        self.assertEqual(sessions[0].state, "RUN")
+        self.assertEqual(len(collection.sessions), 1)
+        self.assertEqual(collection.sessions[0].id, "session-old")
+        self.assertEqual(collection.sessions[0].project_name, "ResumedProject")
+        self.assertEqual(collection.sessions[0].state, "RUN")
+
+    def test_attributes_cross_day_deltas_to_models_before_display_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            connection = sqlite3.connect(home / "state_5.sqlite")
+            connection.execute("CREATE TABLE threads (id TEXT, cwd TEXT, title TEXT, model TEXT)")
+            connection.executemany(
+                "INSERT INTO threads VALUES (?, ?, ?, ?)",
+                (
+                    ("session-terra", "/work/TerraProject", "terra task", "gpt-5.6-terra"),
+                    ("session-sol", "/work/SolProject", "sol task", "gpt-5.6-sol"),
+                ),
+            )
+            connection.commit()
+            connection.close()
+
+            log_dir = home / "sessions/2026/07/13"
+            log_dir.mkdir(parents=True)
+            terra_events = [
+                {"timestamp": "2026-07-13T15:50:00Z", "type": "session_meta", "payload": {"session_id": "session-terra", "cwd": "/work/TerraProject"}},
+                {"timestamp": "2026-07-13T15:51:00Z", "type": "turn_context", "payload": {"model": "gpt-5.5"}},
+                self._token_event("2026-07-13T15:59:00Z", 100),
+                {"timestamp": "2026-07-13T16:00:00Z", "type": "event_msg", "payload": {"type": "thread_settings_applied", "thread_settings": {"model": "gpt-5.6-terra"}}},
+                {"timestamp": "2026-07-13T16:00:01Z", "type": "event_msg", "payload": {"type": "task_started"}},
+                self._token_event("2026-07-13T16:01:00Z", 300),
+            ]
+            sol_events = [
+                {"timestamp": "2026-07-14T00:30:00Z", "type": "session_meta", "payload": {"session_id": "session-sol", "cwd": "/work/SolProject"}},
+                {"timestamp": "2026-07-14T00:30:01Z", "type": "turn_context", "payload": {"model": "gpt-5.6-sol"}},
+                self._token_event("2026-07-14T00:31:00Z", 70),
+            ]
+            for name, events in (("rollout-terra.jsonl", terra_events), ("rollout-sol.jsonl", sol_events)):
+                log_path = log_dir / name
+                log_path.write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
+                timestamp = dt.datetime(2026, 7, 14, 1, tzinfo=dt.timezone.utc).timestamp()
+                os.utime(log_path, (timestamp, timestamp))
+
+            now = dt.datetime(2026, 7, 14, 2, tzinfo=dt.timezone.utc)
+            snapshot = CodexStatusDashboard(CodexLocalSource(home), max_projects=1, max_sessions_per_project=1).collect(
+                dt.date(2026, 7, 14), now
+            )
+
+        self.assertEqual(snapshot.projects[0].name, "SolProject")
+        self.assertEqual(snapshot.projects[0].sessions[0].metrics.today_tokens, 70)
+        self.assertEqual(
+            [(usage.model, usage.today_tokens) for usage in snapshot.daily_model_tokens],
+            [("gpt-5.6-terra", 200), ("gpt-5.6-sol", 70)],
+        )
+        data = snapshot.as_dict()
+        self.assertEqual(data["daily_model_tokens"][0], {"model": "gpt-5.6-terra", "today_tokens": 200})
+        layout = KindleTextRenderer().render_layout(snapshot)
+        self.assertIn("gpt-5.6-terra 200 / gpt-5.6-sol 70", layout)
+
+    @staticmethod
+    def _token_event(timestamp: str, total_tokens: int) -> dict[str, object]:
+        return {
+            "timestamp": timestamp,
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "total_token_usage": {
+                        "input_tokens": total_tokens - 10,
+                        "cached_input_tokens": 0,
+                        "total_tokens": total_tokens,
+                    },
+                    "last_token_usage": {
+                        "input_tokens": total_tokens - 10,
+                        "cached_input_tokens": 0,
+                        "total_tokens": total_tokens,
+                    },
+                    "model_context_window": 1000,
+                },
+            },
+        }

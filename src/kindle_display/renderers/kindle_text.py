@@ -10,16 +10,16 @@ class KindleTextRenderer:
 
     TASK_WIDTH = 14
     MODEL_WIDTH = 14
-    STATE_WIDTH = 5
+    STATE_WIDTH = 3
     CONTEXT_WIDTH = 4
-    TOKEN_WIDTH = 6
+    TOKEN_WIDTH = 12
     CACHE_WIDTH = 7
     SESSION_TITLE_WIDTH = TASK_WIDTH - 2
     PROJECT_TITLE_WIDTH = 28
     # FBInk collapses ASCII and no-break spaces; figure space remains a glyph.
     TABLE_SPACE = "\u2007"
-    TASK_MODEL_GAP = 4
-    MODEL_STATE_GAP = 4
+    TASK_MODEL_GAP = 2
+    MODEL_STATE_GAP = 2
 
     def __init__(self, width: int = 25) -> None:
         if width < 16:
@@ -35,7 +35,7 @@ class KindleTextRenderer:
             lines.extend(["", self._clip(project.name, self.width - self._width(project_suffix)) + project_suffix])
             for session in project.sessions:
                 metrics = session.metrics
-                suffix = f" [{session.state}]"
+                suffix = f" [{self._state_label(session.state)}]"
                 lines.append(self._clip(self._display_title(session.title, session.id), self.width - self._width(suffix)) + suffix)
         return "\n".join(lines) + "\n"
 
@@ -46,14 +46,18 @@ class KindleTextRenderer:
             for status in ("RUN", "DONE", "STAL", "ABRT", "IDLE")
         }
         status_summary = " / ".join(
-            f"{count} {status}" for status, count in status_counts.items() if count
+            f"{count} {self._state_label(status)}" for status, count in status_counts.items() if count
         )
-        lines = [
-            f"CODEX STATUS / {snapshot.generated_at.astimezone().strftime('%H:%M')}",
-            status_summary,
-            self._table_row("TASK", "MODEL", "STATE", "CTX", "TOK", "C L/T"),
-            "-" * self._table_width(),
-        ]
+        header = f"CODEX STATUS / {snapshot.generated_at.astimezone().strftime('%H:%M')}"
+        if status_summary:
+            header += f" / {status_summary}"
+        lines = [header, *self._model_summary_lines(snapshot)]
+        lines.extend(
+            (
+                self._table_row("TASK", "MODEL", "STA", "CTX", "TOK", "C L/T"),
+                "-" * self._table_width(),
+            )
+        )
         for project in snapshot.projects[:3]:
             if len(lines) > 4:
                 lines.append("")
@@ -62,10 +66,17 @@ class KindleTextRenderer:
                 metrics = session.metrics
                 title = "> " + self._clip_title(self._display_title(session.title, session.id), self.SESSION_TITLE_WIDTH)
                 context = f"{metrics.context_percent}%"
-                token_total = self._tokens(metrics.total_tokens)
+                token_total = f"{self._tokens(metrics.today_tokens)}/{self._tokens(metrics.total_tokens)}"
                 cache = f"{metrics.cache_last_percent}/{metrics.cache_total_percent}"
                 lines.append(
-                    self._table_row(title, self._model_label(session.model), session.state, context, token_total, cache)
+                    self._table_row(
+                        title,
+                        self._model_label(session.model),
+                        self._state_label(session.state),
+                        context,
+                        token_total,
+                        cache,
+                    )
                 )
         page = "\x1e".join(lines)
         font_px = 26 if len(lines) <= 15 else 22
@@ -140,7 +151,9 @@ class KindleTextRenderer:
             return f"{value / 1_000_000_000:.1f}B"
         if value >= 1_000_000:
             return f"{value / 1_000_000:.1f}M"
-        return f"{value // 1_000}k"
+        if value >= 1_000:
+            return f"{value // 1_000}k"
+        return str(value)
 
     @staticmethod
     def _display_title(title: str, session_id: str) -> str:
@@ -155,6 +168,36 @@ class KindleTextRenderer:
         if "gpt-5.6-sol" in normalized:
             return "gpt-5.6-sol"
         return KindleTextRenderer._clip_static(model, 14)
+
+    @staticmethod
+    def _model_summary_label(model: str) -> str:
+        normalized = model.lower()
+        if "gpt-5.6-terra" in normalized:
+            return "gpt-5.6-terra"
+        if "gpt-5.6-sol" in normalized:
+            return "gpt-5.6-sol"
+        if "gpt-5.5" in normalized:
+            return "gpt-5.5"
+        if normalized == "unknown":
+            return "unknown"
+        return KindleTextRenderer._clip_static(model, 18)
+
+    def _model_summary_lines(self, snapshot: CodexStatusSnapshot) -> list[str]:
+        prefix = ""
+        if not snapshot.daily_model_tokens:
+            return ["no token usage"]
+        lines: list[str] = []
+        line = prefix
+        for usage in snapshot.daily_model_tokens:
+            entry = f"{self._model_summary_label(usage.model)} {self._tokens(usage.today_tokens)}"
+            separator = "" if line == prefix else " / "
+            if self._width(line + separator + entry) > self._table_width() and line != prefix:
+                lines.append(line)
+                line = entry
+            else:
+                line += separator + entry
+        lines.append(line)
+        return lines
 
     @staticmethod
     def _state_label(state: str) -> str:

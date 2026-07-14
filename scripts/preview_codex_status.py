@@ -18,6 +18,7 @@ def main() -> int:
     parser.add_argument("--width", type=int, default=25)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--layout", action="store_true", help="emit FBInk layout blocks")
+    parser.add_argument("--usage", action="store_true", help="print daily global model totals and visible sessions")
     args = parser.parse_args()
     session_date = dt.date.fromisoformat(args.date)
 
@@ -28,6 +29,14 @@ def main() -> int:
     ).collect(session_date)
     if args.json:
         print(json.dumps(snapshot.as_dict(), ensure_ascii=False, indent=2))
+    elif args.usage:
+        print(f"TODAY TOKENS / {snapshot.session_date.isoformat()}")
+        for usage in snapshot.daily_model_tokens:
+            print(f"{usage.model}\t{usage.today_tokens}")
+        print("DISPLAYED SESSIONS")
+        for project in snapshot.projects:
+            for session in project.sessions:
+                print(f"{session.project_name}\t{session.model}\t{session.metrics.today_tokens}\t{session.title}")
     elif args.layout:
         print(KindleTextRenderer(args.width).render_layout(snapshot), end="")
     else:

@@ -17,9 +17,9 @@ class CodexStatusDashboard:
 
     def collect(self, session_date: dt.date, now: dt.datetime | None = None) -> CodexStatusSnapshot:
         now = now or dt.datetime.now(dt.timezone.utc)
-        sessions = self.source.collect(session_date, now)
+        collection = self.source.collect(session_date, now)
         grouped = defaultdict(list)
-        for session in sessions:
+        for session in collection.sessions:
             grouped[session.cwd].append(session)
         projects = tuple(
             ProjectSnapshot(
@@ -29,4 +29,9 @@ class CodexStatusDashboard:
             )
             for cwd, project_sessions in list(grouped.items())[: self.max_projects]
         )
-        return CodexStatusSnapshot(generated_at=now, session_date=session_date, projects=projects)
+        return CodexStatusSnapshot(
+            generated_at=now,
+            session_date=session_date,
+            projects=projects,
+            daily_model_tokens=collection.daily_model_tokens,
+        )

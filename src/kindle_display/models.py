@@ -11,6 +11,7 @@ class SessionMetrics:
     context_window_tokens: int
     cache_total_percent: int
     cache_last_percent: int
+    today_tokens: int
     total_tokens: int
 
     @property
@@ -42,10 +43,25 @@ class ProjectSnapshot:
 
 
 @dataclass(frozen=True)
+class ModelTokenUsage:
+    model: str
+    today_tokens: int
+
+
+@dataclass(frozen=True)
+class CodexCollectionSnapshot:
+    """All active sessions plus global daily totals before display selection."""
+
+    sessions: tuple[SessionSnapshot, ...]
+    daily_model_tokens: tuple[ModelTokenUsage, ...]
+
+
+@dataclass(frozen=True)
 class CodexStatusSnapshot:
     generated_at: datetime
     session_date: date
     projects: tuple[ProjectSnapshot, ...]
+    daily_model_tokens: tuple[ModelTokenUsage, ...]
 
     @property
     def session_count(self) -> int:
@@ -57,6 +73,10 @@ class CodexStatusSnapshot:
             "session_date": self.session_date.isoformat(),
             "project_count": len(self.projects),
             "session_count": self.session_count,
+            "daily_model_tokens": [
+                {"model": usage.model, "today_tokens": usage.today_tokens}
+                for usage in self.daily_model_tokens
+            ],
             "projects": [
                 {
                     "name": project.name,
@@ -80,6 +100,7 @@ class CodexStatusSnapshot:
                                 "last_percent": session.metrics.cache_last_percent,
                             },
                             "total_tokens": session.metrics.total_tokens,
+                            "today_tokens": session.metrics.today_tokens,
                         }
                         for session in project.sessions
                     ],
