@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -30,7 +31,10 @@ class CodexStatusTest(unittest.TestCase):
                 {"timestamp": "2026-07-13T06:01:00Z", "type": "event_msg", "payload": {"type": "task_started"}},
                 {"timestamp": "2026-07-13T06:02:00Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 1000, "cached_input_tokens": 800, "total_tokens": 1010}, "last_token_usage": {"input_tokens": 200, "cached_input_tokens": 100, "total_tokens": 205}, "model_context_window": 1000}}},
             ]
-            (log_dir / "rollout-test.jsonl").write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
+            log_path = log_dir / "rollout-test.jsonl"
+            log_path.write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
+            timestamp = dt.datetime(2026, 7, 13, 6, 2, tzinfo=dt.timezone.utc).timestamp()
+            os.utime(log_path, (timestamp, timestamp))
 
             now = dt.datetime(2026, 7, 13, 6, 3, tzinfo=dt.timezone.utc)
             snapshot = CodexStatusDashboard(CodexLocalSource(home), max_projects=2, max_sessions_per_project=2).collect(dt.date(2026, 7, 13), now)
@@ -53,3 +57,36 @@ class CodexStatusTest(unittest.TestCase):
         self.assertEqual(KindleTextRenderer()._clip_title("这篇文章讲了什么", 12), "这篇文章讲..")
         self.assertEqual(KindleTextRenderer()._width(KindleTextRenderer()._clip_title("这篇文章讲了什么", 12)), 12)
         self.assertEqual(snapshot.as_dict()["projects"][0]["sessions"][0]["context"]["percent"], 20)
+
+    def test_collects_a_session_resumed_from_an_older_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            connection = sqlite3.connect(home / "state_5.sqlite")
+            connection.execute("CREATE TABLE threads (id TEXT, cwd TEXT, title TEXT, model TEXT)")
+            connection.execute(
+                "INSERT INTO threads VALUES (?, ?, ?, ?)",
+                ("session-old", "/work/ResumedProject", "旧 session 的后续请求", "gpt-test"),
+            )
+            connection.commit()
+            connection.close()
+
+            log_dir = home / "sessions/2026/07/03"
+            log_dir.mkdir(parents=True)
+            events = [
+                {"timestamp": "2026-07-03T06:00:00Z", "type": "session_meta", "payload": {"session_id": "session-old", "cwd": "/work/ResumedProject"}},
+                {"timestamp": "2026-07-03T06:01:00Z", "type": "event_msg", "payload": {"type": "task_complete"}},
+                {"timestamp": "2026-07-14T06:01:00Z", "type": "event_msg", "payload": {"type": "task_started"}},
+                {"timestamp": "2026-07-14T06:02:00Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 1000, "cached_input_tokens": 800, "total_tokens": 1010}, "last_token_usage": {"input_tokens": 200, "cached_input_tokens": 100, "total_tokens": 205}, "model_context_window": 1000}}},
+            ]
+            log_path = log_dir / "rollout-test.jsonl"
+            log_path.write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
+            timestamp = dt.datetime(2026, 7, 14, 6, 2, tzinfo=dt.timezone.utc).timestamp()
+            os.utime(log_path, (timestamp, timestamp))
+
+            now = dt.datetime(2026, 7, 14, 6, 3, tzinfo=dt.timezone.utc)
+            sessions = CodexLocalSource(home).collect(dt.date(2026, 7, 14), now)
+
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0].id, "session-old")
+        self.assertEqual(sessions[0].project_name, "ResumedProject")
+        self.assertEqual(sessions[0].state, "RUN")

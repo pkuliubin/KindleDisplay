@@ -3,11 +3,14 @@
 Low-frequency Codex session status for a Kindle 4 over USBNetwork.
 
 For a new Mac, follow [wiki/03-new-mac-setup.md](wiki/03-new-mac-setup.md).
+For the current reusable CJK table-rendering practice, see
+[wiki/04-cjk-table-rendering.md](wiki/04-cjk-table-rendering.md).
 
 The Python package is split by responsibility:
 
 - `sources/`: local Codex state readers; currently `CodexLocalSource` joins
-  SQLite metadata with the day's rollout events.
+  SQLite metadata with every rollout file updated today, including sessions
+  originally created on an earlier day.
 - `dashboards/`: scenario policy; `CodexStatusDashboard` groups and selects
   sessions without making layout decisions.
 - `renderers/`: Kindle-only fixed-width text layout.
