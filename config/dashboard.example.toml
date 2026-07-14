@@ -1,0 +1,75 @@
+[runtime]
+run_dir = "/tmp/kindle-display"
+log_level = "INFO"
+offline_retry_seconds = 15
+persist_last_good_pages = true
+
+[kindle]
+host = "192.168.15.244"
+ssh_key = "${HOME}/.ssh/kindle_display_ed25519"
+connect_timeout_seconds = 5
+display_timeout_seconds = 20
+orientation = "landscape"
+normal_refresh_profile = "clean"
+full_refresh_profile = "flash_clean"
+
+[kindle.fonts]
+cjk_mono = "/mnt/us/fonts/SarasaMonoSC-Regular.ttf"
+
+[playlist]
+task_order = ["codex", "reddit-subscriptions"]
+full_refresh_interval_seconds = 1800
+full_refresh_on_start = true
+
+[[tasks]]
+id = "codex"
+kind = "codex"
+enabled = true
+
+[tasks.collection]
+interval_seconds = 60
+timeout_seconds = 20
+run_on_start = true
+
+[tasks.display]
+block_seconds = 20
+min_page_seconds = 15
+max_pages = 1
+weight = 1
+
+[tasks.options]
+max_projects = 3
+max_sessions_per_project = 3
+
+[[tasks]]
+id = "reddit-subscriptions"
+kind = "reddit_subscriptions"
+enabled = true
+
+[tasks.collection]
+interval_seconds = 300
+timeout_seconds = 90
+run_on_start = true
+
+[tasks.display]
+block_seconds = 30
+min_page_seconds = 15
+max_pages = 2
+weight = 1
+
+[tasks.source]
+type = "command_json"
+cwd = "/Users/liubin/Projects/AlphaDecisionTaskManager"
+argv = [
+  "/opt/anaconda3/envs/college/bin/python",
+  "scripts/show_reddit_subscription_status.py",
+  "--recent-runs", "30",
+  "--recent-tasks", "30",
+  "--format", "json",
+]
+max_stdout_bytes = 5242880
+
+[tasks.options]
+rows_per_page = 12
+max_subscriptions = 24
+timezone = "Asia/Shanghai"
