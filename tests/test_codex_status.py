@@ -44,7 +44,7 @@ class CodexStatusTest(unittest.TestCase):
         self.assertEqual(session.metrics.context_percent, 20)
         self.assertEqual(session.metrics.cache_total_percent, 80)
         self.assertEqual(session.metrics.cache_last_percent, 50)
-        self.assertIn("26\t20\t20\t15\tttf_page\tCODEX STATUS", KindleTextRenderer().render_layout(snapshot))
+        self.assertIn("24\t20\t20\t15\tttf_page\tCODEX STATUS", KindleTextRenderer().render_layout(snapshot))
         rendered = KindleTextRenderer().render(snapshot)
         self.assertIn("KindleDisplay [1]", rendered)
         self.assertIn("wiki [R]", rendered)

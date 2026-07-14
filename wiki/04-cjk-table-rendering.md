@@ -81,10 +81,9 @@ FBInk 的 TrueType 文本流不应依赖连续 ASCII 空格或普通不换行空
 
 ### 字号与页面高度
 
-字号必须保持偶数像素，避免英文半格在像素级出现累计舍入误差：
+Codex 页面固定使用 `24px`。真机验证表明，当前 FBInk 1.24.0 的 OpenType 渲染在 `20px` 和 `22px` 下会让中英文混排行产生累计像素误差，即使 Sarasa 字体文件本身的 advance 严格为英文 500、中文 1000；`24px` 下同一组文本可以准确对齐。
 
-- 当前页总行数不超过 15 行：`26px`；
-- 更多内容：回落到 `22px`，避免底部被截断。
+因此不要根据行数自动切换到未经真机验证的字号。页面内容过多时，应由 Codex Renderer 限制行数或减少次要汇总内容，而不是缩小字体破坏列对齐。
 
 当前文本区使用 `top=20`、`left=20`、`right=15`、`bottom=20`。新增字段或扩大列宽时，必须先按“显示单位 * 半格像素 + 左右边距”验算 800px 横屏宽度，再进行真机发送。
 
@@ -100,7 +99,7 @@ font_px<TAB>top<TAB>left<TAB>right<TAB>ttf_page<TAB>page_text
 
 ```sh
 /mnt/us/fbink -q <refresh-profile-flags> -t \
-  regular=/mnt/us/fonts/SarasaMonoSC-Regular.ttf,px=26,... \
+  regular=/mnt/us/fonts/SarasaMonoSC-Regular.ttf,px=24,... \
   -- "<whole page>"
 ```
 
@@ -130,6 +129,6 @@ font_px<TAB>top<TAB>left<TAB>right<TAB>ttf_page<TAB>page_text
 2. 复用 `KindleTextRenderer` 的显示单位、填充和截断规则，或基于它创建场景专属 renderer。
 3. 一个完整页面只产生一条 `ttf_page` 记录。
 4. 先运行 `./scripts/kindle-dashboard.sh preview --task <id> --format text` 检查逻辑文本；再运行 `once --task <id> --page <n>` 真机检查列对齐、底部边界和残影。
-5. 内容量接近最大行数时，专门验证字号回落后的布局，不要只用少量 session 页面验收。
+5. 内容量接近最大行数时，验证固定 24px 页面不会超出底部。
 
 USBNetwork、SSH key、字体安装与重新连接后的 Mac RNDIS 地址修复，见 `wiki/03-new-mac-setup.md`。

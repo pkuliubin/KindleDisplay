@@ -85,12 +85,11 @@ class KindleTextRenderer:
                         cache,
                     )
                 )
-        font_px = 26 if len(lines) <= 15 else 22
         return PageSpec(
             page_id="codex:0",
             text="\n".join(lines),
             font_role="cjk_mono",
-            font_px=font_px,
+            font_px=24,
             top=20,
             left=20,
             right=15,

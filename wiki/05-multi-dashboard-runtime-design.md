@@ -727,7 +727,7 @@ class KindleSink:
 - 主页面统一使用 Sarasa Mono SC，不混用 IBM 点阵字体；
 - ASCII、数字和半角空格按 1 个显示单位计算，东亚全角字符按 2 个显示单位计算；
 - 表格填充使用 `U+2007 FIGURE SPACE`，不使用连续 ASCII 空格或 NBSP；
-- 字号使用偶数像素，避免半格字符累计像素舍入误差；
+- Codex 使用真机验证过的固定 `24px`；不能仅凭偶数字号假设中英文半格不会产生累计像素误差；
 - 截断标题必须精确填满字段宽度，奇数宽度空位用 `.` 补足；
 - 当前边距为 `top=20`、`left=20`、`right=15`、`bottom=20`；
 - layout record 内部用 `U+001E` 暂存逻辑换行，Shell 发送前恢复为真实换行；
@@ -767,7 +767,7 @@ Codex 每日 token 改动和多看板运行时的边界如下：
 - `CodexLocalSource`、Codex 业务模型和 `KindleTextRenderer` 按 `wiki/06` 演进；
 - `CodexDashboardTask` 只调用这些最新业务接口并包装为 TaskBuildResult；
 - PageStore 和 PlaylistScheduler 不导入 `SessionMetrics`、`daily_model_tokens` 或任何 Codex 字段；
-- `wiki/06` 增加顶部汇总行导致字号回落时，由 Codex Renderer 自己决定 PageSpec 的 `font_px`；
+- `wiki/06` 增加顶部汇总行后仍保持已验证的 24px；内容超高时由 Codex Renderer 限制行数或次要汇总，而不是回落到未验证字号；
 - Codex 完整 rollout 解析若接近 `timeout_seconds`，先实测并调整 Codex 任务 timeout；通用调度器不针对 Codex 增加特殊分支。
 
 Codex 推荐初始策略：
@@ -1156,7 +1156,7 @@ Codex 必须保留现有断言：
 - CJK 奇数宽度标题补 `.`；
 - `wiki/06` 定义的 TASK、MODEL、STA、CTX、TOK、C L/T 等列对齐；
 - 一页一条 ttf_page；
-- Renderer 根据最终逻辑行数选择的字号能完整容纳页面；
+- Renderer 使用固定 24px，并保证最大逻辑行数能完整容纳页面；
 - 每日 token、lifetime token 和顶部模型汇总的新增测试全部通过。
 
 Reddit 必须覆盖：
