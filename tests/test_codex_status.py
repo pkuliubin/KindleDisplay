@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 import os
@@ -7,8 +8,18 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 from kindle_display import CodexLocalSource, CodexStatusDashboard, KindleTextRenderer
+from kindle_display.models import (
+    CodexCollectionSnapshot,
+    CodexStatusSnapshot,
+    ProjectSnapshot,
+    SessionMetrics,
+    SessionSnapshot,
+)
+from kindle_display.runtime.models import CollectionPolicy, DisplayPolicy
+from kindle_display.tasks.codex import CodexDashboardTask
 
 
 class CodexStatusTest(unittest.TestCase):
@@ -37,7 +48,7 @@ class CodexStatusTest(unittest.TestCase):
             os.utime(log_path, (timestamp, timestamp))
 
             now = dt.datetime(2026, 7, 13, 6, 3, tzinfo=dt.timezone.utc)
-            snapshot = CodexStatusDashboard(CodexLocalSource(home), max_projects=2, max_sessions_per_project=2).collect(dt.date(2026, 7, 13), now)
+            snapshot = CodexStatusDashboard(CodexLocalSource(home)).collect(dt.date(2026, 7, 13), now)
 
         session = snapshot.projects[0].sessions[0]
         self.assertEqual(session.state, "RUN")
@@ -137,7 +148,7 @@ class CodexStatusTest(unittest.TestCase):
                 os.utime(log_path, (timestamp, timestamp))
 
             now = dt.datetime(2026, 7, 14, 2, tzinfo=dt.timezone.utc)
-            snapshot = CodexStatusDashboard(CodexLocalSource(home), max_projects=1, max_sessions_per_project=1).collect(
+            snapshot = CodexStatusDashboard(CodexLocalSource(home)).collect(
                 dt.date(2026, 7, 14), now
             )
 
@@ -165,6 +176,99 @@ class CodexStatusTest(unittest.TestCase):
         self.assertIn("$0.0005", layout)
         self.assertIn("gpt-5.6-sol", layout)
         self.assertIn("$0.0006", layout)
+
+    def test_dashboard_keeps_every_session_returned_for_today(self) -> None:
+        now = dt.datetime(2026, 7, 14, 2, tzinfo=dt.timezone.utc)
+        sessions = tuple(
+            self._session(project_index, session_index, now)
+            for project_index in range(4)
+            for session_index in range(4)
+        )
+        source = Mock()
+        source.collect.return_value = CodexCollectionSnapshot(sessions=sessions, daily_model_tokens=())
+
+        snapshot = CodexStatusDashboard(source).collect(dt.date(2026, 7, 14), now)
+
+        self.assertEqual(len(snapshot.projects), 4)
+        self.assertEqual(snapshot.session_count, 16)
+        self.assertTrue(all(len(project.sessions) == 4 for project in snapshot.projects))
+
+    def test_renderer_paginates_all_sessions_with_stable_page_ids(self) -> None:
+        now = dt.datetime(2026, 7, 14, 2, tzinfo=dt.timezone.utc)
+        projects = tuple(
+            ProjectSnapshot(
+                name=f"project-{project_index}",
+                cwd=f"/work/project-{project_index}",
+                sessions=tuple(self._session(project_index, session_index, now) for session_index in range(4)),
+            )
+            for project_index in range(4)
+        )
+        snapshot = CodexStatusSnapshot(now, now.date(), projects, ())
+
+        pages = KindleTextRenderer(max_pages=8).render_pages(snapshot)
+
+        self.assertEqual([page.page_id for page in pages], ["codex:0", "codex:1", "codex:2"])
+        rendered = "\n".join(page.text for page in pages)
+        for project_index in range(4):
+            for session_index in range(4):
+                self.assertEqual(rendered.count(f"> p{project_index}-s{session_index}"), 1)
+
+    def test_renderer_marks_sessions_beyond_the_page_budget(self) -> None:
+        now = dt.datetime(2026, 7, 14, 2, tzinfo=dt.timezone.utc)
+        projects = tuple(
+            ProjectSnapshot(
+                name=f"project-{index}",
+                cwd=f"/work/project-{index}",
+                sessions=(self._session(index, 0, now),),
+            )
+            for index in range(28)
+        )
+        snapshot = CodexStatusSnapshot(now, now.date(), projects, ())
+
+        pages = KindleTextRenderer(max_pages=8).render_pages(snapshot)
+
+        self.assertEqual(len(pages), 8)
+        self.assertIn("+4 SESSIONS HIDDEN", pages[-1].text)
+
+    def test_codex_task_publishes_every_rendered_page(self) -> None:
+        now = dt.datetime(2026, 7, 14, 2, tzinfo=dt.timezone.utc)
+        projects = tuple(
+            ProjectSnapshot(
+                name=f"project-{project_index}",
+                cwd=f"/work/project-{project_index}",
+                sessions=tuple(self._session(project_index, session_index, now) for session_index in range(4)),
+            )
+            for project_index in range(4)
+        )
+        dashboard = Mock()
+        dashboard.collect.return_value = CodexStatusSnapshot(now, now.date(), projects, ())
+        task = CodexDashboardTask(
+            "daily-codex",
+            dashboard,
+            KindleTextRenderer(max_pages=8),
+            CollectionPolicy(60, 20),
+            DisplayPolicy(120, 15, 8),
+        )
+
+        result = asyncio.run(task.build_pages(now))
+
+        self.assertEqual(
+            [page.page_id for page in result.pages],
+            ["daily-codex:0", "daily-codex:1", "daily-codex:2"],
+        )
+
+    @staticmethod
+    def _session(project_index: int, session_index: int, now: dt.datetime) -> SessionSnapshot:
+        return SessionSnapshot(
+            id=f"session-{project_index}-{session_index}",
+            project_name=f"project-{project_index}",
+            cwd=f"/work/project-{project_index}",
+            title=f"p{project_index}-s{session_index}",
+            model="gpt-test",
+            state="DONE",
+            last_event_at=now,
+            metrics=SessionMetrics(100, 1000, 50, 50, 100, 200),
+        )
 
     @staticmethod
     def _token_event(timestamp: str, total_tokens: int) -> dict[str, object]:

@@ -4,12 +4,12 @@ import unicodedata
 from decimal import Decimal
 
 from kindle_display.devices.layout_protocol import serialize_ttf_page
-from kindle_display.models import CodexStatusSnapshot
+from kindle_display.models import CodexStatusSnapshot, SessionSnapshot
 from kindle_display.runtime.models import PageSpec
 
 
 class KindleTextRenderer:
-    """Render a compact CJK monospaced table in one FBInk text block."""
+    """Render compact CJK monospaced tables as complete FBInk pages."""
 
     TASK_WIDTH = 14
     MODEL_WIDTH = 14
@@ -23,11 +23,16 @@ class KindleTextRenderer:
     TABLE_SPACE = "\u2007"
     TASK_MODEL_GAP = 2
     MODEL_STATE_GAP = 2
+    PROJECTS_PER_PAGE = 3
+    SESSIONS_PER_PROJECT_BLOCK = 3
 
-    def __init__(self, width: int = 25) -> None:
+    def __init__(self, width: int = 25, max_pages: int = 8) -> None:
         if width < 16:
             raise ValueError("width must be at least 16")
+        if max_pages < 1:
+            raise ValueError("max_pages must be positive")
         self.width = width
+        self.max_pages = max_pages
 
     def render(self, snapshot: CodexStatusSnapshot) -> str:
         running = sum(project.running_count for project in snapshot.projects)
@@ -42,11 +47,48 @@ class KindleTextRenderer:
         return "\n".join(lines) + "\n"
 
     def render_layout(self, snapshot: CodexStatusSnapshot) -> str:
-        """Return one TrueType table block, using an ASCII-safe line separator."""
+        """Return the first TrueType page for the legacy single-page caller."""
         return serialize_ttf_page(self.render_page(snapshot))
 
     def render_page(self, snapshot: CodexStatusSnapshot) -> PageSpec:
-        """Return one complete page without transport-specific TSV encoding."""
+        """Return the first page for callers that only support a single page."""
+        return self.render_pages(snapshot)[0]
+
+    def render_pages(self, snapshot: CodexStatusSnapshot) -> tuple[PageSpec, ...]:
+        """Render every selected session, splitting large projects across pages."""
+        project_blocks = [
+            (project.name, project.sessions[start : start + self.SESSIONS_PER_PROJECT_BLOCK])
+            for project in snapshot.projects
+            for start in range(0, len(project.sessions), self.SESSIONS_PER_PROJECT_BLOCK)
+        ]
+        if not project_blocks:
+            project_blocks = [("NO ACTIVE SESSIONS", ())]
+
+        page_blocks = [
+            project_blocks[start : start + self.PROJECTS_PER_PAGE]
+            for start in range(0, len(project_blocks), self.PROJECTS_PER_PAGE)
+        ]
+        hidden_sessions = 0
+        if len(page_blocks) > self.max_pages:
+            hidden_sessions = sum(
+                len(sessions)
+                for blocks in page_blocks[self.max_pages :]
+                for _, sessions in blocks
+            )
+            page_blocks = page_blocks[: self.max_pages]
+
+        return tuple(
+            self._render_page(snapshot, blocks, index, hidden_sessions if index == len(page_blocks) - 1 else 0)
+            for index, blocks in enumerate(page_blocks)
+        )
+
+    def _render_page(
+        self,
+        snapshot: CodexStatusSnapshot,
+        project_blocks: list[tuple[str, tuple[SessionSnapshot, ...]]],
+        page_index: int,
+        hidden_sessions: int,
+    ) -> PageSpec:
         status_counts = {
             status: sum(session.state == status for project in snapshot.projects for session in project.sessions)
             for status in ("RUN", "DONE", "STAL", "ABRT", "IDLE")
@@ -65,11 +107,11 @@ class KindleTextRenderer:
                 "-" * self._table_width(),
             )
         )
-        for project_index, project in enumerate(snapshot.projects[:3]):
+        for project_index, (project_name, sessions) in enumerate(project_blocks):
             if project_index:
                 lines.append("")
-            lines.append(self._clip(project.name, self.PROJECT_TITLE_WIDTH))
-            for session in project.sessions[:3]:
+            lines.append(self._clip(project_name, self.PROJECT_TITLE_WIDTH))
+            for session in sessions:
                 metrics = session.metrics
                 title = "> " + self._clip_title(self._display_title(session.title, session.id), self.SESSION_TITLE_WIDTH)
                 context = f"{metrics.context_percent}%"
@@ -85,8 +127,10 @@ class KindleTextRenderer:
                         cache,
                     )
                 )
+        if hidden_sessions:
+            lines.append(f"+{hidden_sessions} SESSIONS HIDDEN")
         return PageSpec(
-            page_id="codex:0",
+            page_id=f"codex:{page_index}",
             text="\n".join(lines),
             font_role="cjk_mono",
             font_px=24,

@@ -98,7 +98,7 @@ tail -f /tmp/kindle-display/kindle-dashboard.log
 默认配置下：
 
 ```text
-Codex          20 秒
+Codex          120 秒（最多 8 页）
 Reddit 第 1 页 15 秒
 Reddit 第 2 页 15 秒
 然后继续循环

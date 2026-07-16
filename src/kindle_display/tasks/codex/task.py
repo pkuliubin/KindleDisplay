@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+from dataclasses import replace
 from zoneinfo import ZoneInfo
 
 from kindle_display.dashboards.codex_status import CodexStatusDashboard
@@ -30,16 +31,8 @@ class CodexDashboardTask:
     async def build_pages(self, now: dt.datetime) -> TaskBuildResult:
         session_date = now.astimezone(self.timezone).date()
         snapshot = await asyncio.to_thread(self.dashboard.collect, session_date, now)
-        page = self.renderer.render_page(snapshot)
-        if page.page_id != f"{self.task_id}:0":
-            page = type(page)(
-                page_id=f"{self.task_id}:0",
-                text=page.text,
-                font_role=page.font_role,
-                font_px=page.font_px,
-                top=page.top,
-                left=page.left,
-                right=page.right,
-                bottom=page.bottom,
-            )
-        return TaskBuildResult(source_generated_at=snapshot.generated_at, pages=(page,))
+        pages = tuple(
+            replace(page, page_id=f"{self.task_id}:{index}")
+            for index, page in enumerate(self.renderer.render_pages(snapshot))
+        )
+        return TaskBuildResult(source_generated_at=snapshot.generated_at, pages=pages)

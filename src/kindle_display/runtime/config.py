@@ -222,7 +222,7 @@ def _parse_task(value: Any, index: int) -> TaskConfig:
     if not isinstance(options, dict):
         raise ValueError(f"{task_id}.options must be a table")
     allowed_options = {
-        "codex": {"max_projects", "max_sessions_per_project"},
+        "codex": set(),
         "reddit_subscriptions": {"rows_per_page", "max_subscriptions", "timezone"},
     }[kind]
     _check_keys(options, allowed_options, f"{task_id}.options")

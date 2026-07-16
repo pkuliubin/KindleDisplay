@@ -299,14 +299,10 @@ timeout_seconds = 20
 run_on_start = true
 
 [tasks.display]
-block_seconds = 20
+block_seconds = 120
 min_page_seconds = 15
-max_pages = 1
+max_pages = 8
 weight = 1
-
-[tasks.options]
-max_projects = 3
-max_sessions_per_project = 3
 
 [[tasks]]
 id = "reddit-subscriptions"
@@ -751,11 +747,11 @@ CodexLocalSource
 class CodexDashboardTask:
     async def build_pages(self, now: datetime) -> TaskBuildResult:
         snapshot = await asyncio.to_thread(...collect...)
-        page = renderer.render_page(snapshot)
-        return TaskBuildResult(snapshot.generated_at, (page,))
+        pages = renderer.render_pages(snapshot)
+        return TaskBuildResult(snapshot.generated_at, pages)
 ```
 
-需要把 `KindleTextRenderer.render_layout()` 的核心输出重构为 `render_page() -> PageSpec`。原 `render_layout()` 保留为兼容方法，通过序列化 PageSpec 产生原来的 TSV，保证：
+需要把 `KindleTextRenderer.render_layout()` 的核心输出重构为 `render_pages() -> tuple[PageSpec, ...]`。原 `render_layout()` 保留为单页兼容方法，通过序列化第一页产生原来的 TSV，保证：
 
 - `scripts/preview_codex_status.py --layout` 继续工作；
 - `wiki/06-codex-daily-token-usage-design.md` 完成后的 Codex 页面字段、字号、列宽和 CJK 对齐不因运行时接入再次变化；

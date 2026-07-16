@@ -10,10 +10,8 @@ from kindle_display.sources.codex_local import CodexLocalSource
 class CodexStatusDashboard:
     """Select and group Codex sessions without making any display decisions."""
 
-    def __init__(self, source: CodexLocalSource, max_projects: int = 3, max_sessions_per_project: int = 3) -> None:
+    def __init__(self, source: CodexLocalSource) -> None:
         self.source = source
-        self.max_projects = max_projects
-        self.max_sessions_per_project = max_sessions_per_project
 
     def collect(self, session_date: dt.date, now: dt.datetime | None = None) -> CodexStatusSnapshot:
         now = now or dt.datetime.now(dt.timezone.utc)
@@ -25,9 +23,9 @@ class CodexStatusDashboard:
             ProjectSnapshot(
                 name=project_sessions[0].project_name,
                 cwd=cwd,
-                sessions=tuple(project_sessions[: self.max_sessions_per_project]),
+                sessions=tuple(project_sessions),
             )
-            for cwd, project_sessions in list(grouped.items())[: self.max_projects]
+            for cwd, project_sessions in grouped.items()
         )
         return CodexStatusSnapshot(
             generated_at=now,

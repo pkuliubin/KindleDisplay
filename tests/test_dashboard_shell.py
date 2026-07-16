@@ -58,9 +58,6 @@ timeout_seconds = 20
 block_seconds = 2
 min_page_seconds = 2
 max_pages = 1
-[tasks.options]
-max_projects = 1
-max_sessions_per_project = 1
 """,
                 encoding="utf-8",
             )

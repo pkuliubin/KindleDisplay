@@ -50,9 +50,6 @@ class RuntimeConfigTest(unittest.TestCase):
             min_page_seconds = 30
             max_pages = 1
             weight = 2
-            [tasks.options]
-            max_projects = 3
-            max_sessions_per_project = 3
 
             [[tasks]]
             id = "reddit"

@@ -32,14 +32,10 @@ timeout_seconds = 20
 run_on_start = true
 
 [tasks.display]
-block_seconds = 20
+block_seconds = 120
 min_page_seconds = 15
-max_pages = 1
+max_pages = 8
 weight = 1
-
-[tasks.options]
-max_projects = 3
-max_sessions_per_project = 3
 
 [[tasks]]
 id = "reddit-subscriptions"

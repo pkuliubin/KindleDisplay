@@ -18,16 +18,10 @@ def build_tasks(config: AppConfig) -> tuple[DashboardTask, ...]:
 
 def build_task(config: TaskConfig) -> DashboardTask:
     if config.kind == "codex":
-        max_projects = _positive_option(config, "max_projects", 3)
-        max_sessions = _positive_option(config, "max_sessions_per_project", 3)
         return CodexDashboardTask(
             config.task_id,
-            CodexStatusDashboard(
-                CodexLocalSource(),
-                max_projects=max_projects,
-                max_sessions_per_project=max_sessions,
-            ),
-            KindleTextRenderer(),
+            CodexStatusDashboard(CodexLocalSource()),
+            KindleTextRenderer(max_pages=config.display.max_pages),
             config.collection,
             config.display,
         )
