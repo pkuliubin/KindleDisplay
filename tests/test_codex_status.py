@@ -44,6 +44,15 @@ class CodexStatusTest(unittest.TestCase):
             ]
             log_path = log_dir / "rollout-test.jsonl"
             log_path.write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
+            (home / "session_index.jsonl").write_text(
+                "\n".join(
+                    (
+                        json.dumps({"id": "session-1", "thread_name": "旧标题"}),
+                        json.dumps({"id": "session-1", "thread_name": "Kindle 看板"}),
+                    )
+                ),
+                encoding="utf-8",
+            )
             timestamp = dt.datetime(2026, 7, 13, 6, 2, tzinfo=dt.timezone.utc).timestamp()
             os.utime(log_path, (timestamp, timestamp))
 
@@ -51,6 +60,7 @@ class CodexStatusTest(unittest.TestCase):
             snapshot = CodexStatusDashboard(CodexLocalSource(home)).collect(dt.date(2026, 7, 13), now)
 
         session = snapshot.projects[0].sessions[0]
+        self.assertEqual(session.title, "Kindle 看板")
         self.assertEqual(session.state, "RUN")
         self.assertEqual(session.metrics.context_percent, 20)
         self.assertEqual(session.metrics.cache_total_percent, 80)
@@ -58,12 +68,12 @@ class CodexStatusTest(unittest.TestCase):
         self.assertIn("24\t20\t20\t15\tttf_page\tCODEX STATUS", KindleTextRenderer().render_layout(snapshot))
         rendered = KindleTextRenderer().render(snapshot)
         self.assertIn("KindleDisplay [1]", rendered)
-        self.assertIn("wiki [R]", rendered)
+        self.assertIn("Kindle 看板 [R]", rendered)
         layout = KindleTextRenderer().render_layout(snapshot)
         self.assertIn("KindleDisplay", layout)
-        self.assertIn("> 阅读 wiki", layout)
+        self.assertIn("> Kindle 看板", layout)
         self.assertIn("gpt-test", layout)
-        self.assertIn("阅读 wiki", layout)
+        self.assertIn("Kindle 看板", layout)
         self.assertIn("STA", layout)
         self.assertIn("1k/1k", layout)
         self.assertIn("unknown", layout)

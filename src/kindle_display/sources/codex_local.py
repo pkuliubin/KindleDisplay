@@ -33,11 +33,12 @@ class CodexLocalSource:
     def collect(self, session_date: dt.date, now: dt.datetime | None = None) -> CodexCollectionSnapshot:
         now = now or dt.datetime.now(dt.timezone.utc)
         threads = self._load_threads()
+        thread_names = self._load_thread_names()
         sessions: list[SessionSnapshot] = []
         daily_model_tokens: dict[str, Counter[str]] = {}
 
         for path in self._rollouts_updated_on(session_date):
-            session, model_tokens = self._read_rollout(path, threads, now, session_date)
+            session, model_tokens = self._read_rollout(path, threads, thread_names, now, session_date)
             for model, usage in model_tokens.items():
                 daily_model_tokens.setdefault(model, Counter()).update(usage)
             if session is not None:
@@ -90,8 +91,34 @@ class CodexLocalSource:
                 connection.close()
         return {row["id"]: dict(row) for row in rows}
 
+    def _load_thread_names(self) -> dict[str, str]:
+        """Read the latest Desktop thread rename for each session ID."""
+        path = self.codex_home / "session_index.jsonl"
+        names: dict[str, str] = {}
+        try:
+            with path.open(encoding="utf-8") as source:
+                for line in source:
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+                    session_id = record.get("id")
+                    thread_name = record.get("thread_name")
+                    if isinstance(session_id, str) and isinstance(thread_name, str) and thread_name.strip():
+                        names[session_id] = thread_name
+        except OSError:
+            return {}
+        return names
+
     def _read_rollout(
-        self, path: Path, threads: dict[str, dict[str, Any]], now: dt.datetime, session_date: dt.date
+        self,
+        path: Path,
+        threads: dict[str, dict[str, Any]],
+        thread_names: dict[str, str],
+        now: dt.datetime,
+        session_date: dt.date,
     ) -> tuple[SessionSnapshot | None, dict[str, Counter[str]]]:
         session_id = path.stem[-36:]
         metadata: dict[str, Any] = {}
@@ -172,12 +199,13 @@ class CodexLocalSource:
             return None, daily_model_tokens
         cwd = str(thread.get("cwd") or metadata.get("cwd") or "unknown")
         model = latest_model if latest_model != "unknown" else str(thread.get("model") or "unknown")
+        title = thread_names.get(session_id) or str(thread.get("title") or "untitled session")
         return (
             SessionSnapshot(
                 id=session_id,
                 project_name=Path(cwd).name,
                 cwd=cwd,
-                title=str(thread.get("title") or "untitled session"),
+                title=title,
                 model=model,
                 state=self._state(latest_lifecycle, latest_event_at, now),
                 last_event_at=latest_event_at,
