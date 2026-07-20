@@ -59,6 +59,18 @@ ping -c 1 192.168.15.244
 
 `en7` is an example only. A `169.254.*` address means the RNDIS interface still needs the fixed address above.
 
+For frequent unplug/replug use, install the automatic repair service once from the repository root:
+
+```sh
+./scripts/install-kindle-usbnetwork-repair.sh
+```
+
+It installs a root-owned macOS LaunchDaemon. At boot and every five minutes, it finds the `RNDIS/Ethernet Gadget` service and restores `192.168.15.201/24` only when the Kindle interface is active and has another address. It does not run the dashboard as root. To remove it later:
+
+```sh
+./scripts/uninstall-kindle-usbnetwork-repair.sh
+```
+
 ## 5. Verify SSH And FBInk
 
 ```sh

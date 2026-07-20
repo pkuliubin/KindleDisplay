@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unicodedata
 from decimal import Decimal
 
@@ -23,8 +24,7 @@ class KindleTextRenderer:
     TABLE_SPACE = "\u2007"
     TASK_MODEL_GAP = 2
     MODEL_STATE_GAP = 2
-    PROJECTS_PER_PAGE = 3
-    SESSIONS_PER_PROJECT_BLOCK = 3
+    BODY_LINES_PER_PAGE = 13
 
     def __init__(self, width: int = 25, max_pages: int = 8) -> None:
         if width < 16:
@@ -55,37 +55,58 @@ class KindleTextRenderer:
         return self.render_pages(snapshot)[0]
 
     def render_pages(self, snapshot: CodexStatusSnapshot) -> tuple[PageSpec, ...]:
-        """Render every selected session, splitting large projects across pages."""
-        project_blocks = [
-            (project.name, project.sessions[start : start + self.SESSIONS_PER_PROJECT_BLOCK])
-            for project in snapshot.projects
-            for start in range(0, len(project.sessions), self.SESSIONS_PER_PROJECT_BLOCK)
-        ]
-        if not project_blocks:
-            project_blocks = [("NO ACTIVE SESSIONS", ())]
-
-        page_blocks = [
-            project_blocks[start : start + self.PROJECTS_PER_PAGE]
-            for start in range(0, len(project_blocks), self.PROJECTS_PER_PAGE)
-        ]
-        hidden_sessions = 0
-        if len(page_blocks) > self.max_pages:
-            hidden_sessions = sum(
-                len(sessions)
-                for blocks in page_blocks[self.max_pages :]
-                for _, sessions in blocks
-            )
-            page_blocks = page_blocks[: self.max_pages]
-
+        """Render project groups continuously and label only real page continuations."""
+        page_bodies = self._paginate_sessions(snapshot)
+        visible_bodies = page_bodies[: self.max_pages]
+        hidden_sessions = snapshot.session_count - sum(session_count for _, session_count in visible_bodies)
         return tuple(
-            self._render_page(snapshot, blocks, index, hidden_sessions if index == len(page_blocks) - 1 else 0)
-            for index, blocks in enumerate(page_blocks)
+            self._render_page(snapshot, body_lines, index, hidden_sessions if index == len(visible_bodies) - 1 else 0)
+            for index, (body_lines, _) in enumerate(visible_bodies)
         )
+
+    def _paginate_sessions(self, snapshot: CodexStatusSnapshot) -> list[tuple[list[str], int]]:
+        if not snapshot.projects:
+            return [(["NO ACTIVE SESSIONS"], 0)]
+
+        pages: list[tuple[list[str], int]] = []
+        lines: list[str] = []
+        session_count = 0
+
+        def finish_page() -> None:
+            nonlocal lines, session_count
+            pages.append((lines, session_count))
+            lines = []
+            session_count = 0
+
+        for project in snapshot.projects:
+            session_index = 0
+            continued = False
+            while session_index < len(project.sessions):
+                label = f"{project.name} (续)" if continued else project.name
+                prefix = [] if not lines else [""]
+                # Never strand a project heading without a session below it.
+                if len(lines) + len(prefix) + 2 > self.BODY_LINES_PER_PAGE:
+                    finish_page()
+                    continue
+
+                lines.extend((*prefix, self._clip(label, self.PROJECT_TITLE_WIDTH)))
+                available_sessions = self.BODY_LINES_PER_PAGE - len(lines)
+                sessions = project.sessions[session_index : session_index + available_sessions]
+                lines.extend(self._session_row(session) for session in sessions)
+                session_count += len(sessions)
+                session_index += len(sessions)
+                if session_index < len(project.sessions):
+                    finish_page()
+                    continued = True
+
+        if lines:
+            finish_page()
+        return pages
 
     def _render_page(
         self,
         snapshot: CodexStatusSnapshot,
-        project_blocks: list[tuple[str, tuple[SessionSnapshot, ...]]],
+        body_lines: list[str],
         page_index: int,
         hidden_sessions: int,
     ) -> PageSpec:
@@ -107,26 +128,7 @@ class KindleTextRenderer:
                 "-" * self._table_width(),
             )
         )
-        for project_index, (project_name, sessions) in enumerate(project_blocks):
-            if project_index:
-                lines.append("")
-            lines.append(self._clip(project_name, self.PROJECT_TITLE_WIDTH))
-            for session in sessions:
-                metrics = session.metrics
-                title = "> " + self._clip_title(self._display_title(session.title, session.id), self.SESSION_TITLE_WIDTH)
-                context = f"{metrics.context_percent}%"
-                token_total = f"{self._tokens(metrics.today_tokens)}/{self._tokens(metrics.total_tokens)}"
-                cache = f"{metrics.cache_last_percent}/{metrics.cache_total_percent}"
-                lines.append(
-                    self._table_row(
-                        title,
-                        self._model_label(session.model),
-                        self._state_label(session.state),
-                        context,
-                        token_total,
-                        cache,
-                    )
-                )
+        lines.extend(body_lines)
         if hidden_sessions:
             lines.append(f"+{hidden_sessions} SESSIONS HIDDEN")
         return PageSpec(
@@ -138,6 +140,21 @@ class KindleTextRenderer:
             left=20,
             right=15,
             bottom=20,
+        )
+
+    def _session_row(self, session: SessionSnapshot) -> str:
+        metrics = session.metrics
+        title = "> " + self._clip_title(self._display_title(session.title, session.id), self.SESSION_TITLE_WIDTH)
+        context = f"{metrics.context_percent}%"
+        token_total = f"{self._tokens(metrics.today_tokens)}/{self._tokens(metrics.total_tokens)}"
+        cache = f"{metrics.cache_last_percent}/{metrics.cache_total_percent}"
+        return self._table_row(
+            title,
+            self._model_label(session.model),
+            self._state_label(session.state),
+            context,
+            token_total,
+            cache,
         )
 
     def _clip(self, value: str, width: int | None = None) -> str:
@@ -216,7 +233,10 @@ class KindleTextRenderer:
     @staticmethod
     def _display_title(title: str, session_id: str) -> str:
         printable_title = "".join(char if char.isprintable() else " " for char in title).split()
-        return " ".join(printable_title) or f"session-{session_id[-6:]}"
+        normalized = " ".join(printable_title)
+        # Codex skill prompts prepend a local Markdown link that is not useful on Kindle.
+        normalized = re.sub(r"^(?:\[[^\]]+\]\([^)]+\)\s*)+", "", normalized)
+        return normalized or f"session-{session_id[-6:]}"
 
     @staticmethod
     def _model_label(model: str) -> str:

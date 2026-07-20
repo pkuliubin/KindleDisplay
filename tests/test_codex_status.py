@@ -76,6 +76,13 @@ class CodexStatusTest(unittest.TestCase):
         self.assertEqual(KindleTextRenderer()._clip("123456789", 8), "1234567.")
         self.assertEqual(KindleTextRenderer()._clip_title("这篇文章讲了什么", 12), "这篇文章讲..")
         self.assertEqual(KindleTextRenderer()._width(KindleTextRenderer()._clip_title("这篇文章讲了什么", 12)), 12)
+        self.assertEqual(
+            KindleTextRenderer()._display_title(
+                "[$zyb-op](/Users/liubin/.codex/skills/zyb-op/SKILL.md)\n获取 Exception 日志",
+                "session-1",
+            ),
+            "获取 Exception 日志",
+        )
         self.assertEqual(snapshot.as_dict()["projects"][0]["sessions"][0]["context"]["percent"], 20)
 
     def test_collects_a_session_resumed_from_an_older_directory(self) -> None:
@@ -207,7 +214,7 @@ class CodexStatusTest(unittest.TestCase):
 
         pages = KindleTextRenderer(max_pages=8).render_pages(snapshot)
 
-        self.assertEqual([page.page_id for page in pages], ["codex:0", "codex:1", "codex:2"])
+        self.assertEqual([page.page_id for page in pages], ["codex:0", "codex:1"])
         rendered = "\n".join(page.text for page in pages)
         for project_index in range(4):
             for session_index in range(4):
@@ -221,7 +228,7 @@ class CodexStatusTest(unittest.TestCase):
                 cwd=f"/work/project-{index}",
                 sessions=(self._session(index, 0, now),),
             )
-            for index in range(28)
+            for index in range(36)
         )
         snapshot = CodexStatusSnapshot(now, now.date(), projects, ())
 
@@ -229,6 +236,23 @@ class CodexStatusTest(unittest.TestCase):
 
         self.assertEqual(len(pages), 8)
         self.assertIn("+4 SESSIONS HIDDEN", pages[-1].text)
+
+    def test_renderer_keeps_a_large_project_together_until_a_page_break(self) -> None:
+        now = dt.datetime(2026, 7, 14, 2, tzinfo=dt.timezone.utc)
+        project = ProjectSnapshot(
+            name="large-project",
+            cwd="/work/large-project",
+            sessions=tuple(self._session(0, index, now) for index in range(14)),
+        )
+        snapshot = CodexStatusSnapshot(now, now.date(), (project,), ())
+
+        pages = KindleTextRenderer(max_pages=8).render_pages(snapshot)
+
+        self.assertEqual([page.page_id for page in pages], ["codex:0", "codex:1"])
+        self.assertEqual(pages[0].text.count("\nlarge-project\n"), 1)
+        self.assertIn("large-project (续)", pages[1].text)
+        self.assertNotIn("\nlarge-project\n", pages[1].text)
+        self.assertEqual(sum(page.text.count("> p0-s") for page in pages), 14)
 
     def test_codex_task_publishes_every_rendered_page(self) -> None:
         now = dt.datetime(2026, 7, 14, 2, tzinfo=dt.timezone.utc)
@@ -254,7 +278,7 @@ class CodexStatusTest(unittest.TestCase):
 
         self.assertEqual(
             [page.page_id for page in result.pages],
-            ["daily-codex:0", "daily-codex:1", "daily-codex:2"],
+            ["daily-codex:0", "daily-codex:1"],
         )
 
     @staticmethod
