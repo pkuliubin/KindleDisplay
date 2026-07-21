@@ -126,7 +126,9 @@ class PlaylistSchedulerTest(unittest.IsolatedAsyncioTestCase):
         await self.publish("reddit", (self.page("reddit", 0, "old-0"), self.page("reddit", 1, "old-1")))
         self.sink.fail_page = "reddit:1"
         scheduler = self.scheduler()
-        self.assertFalse(await scheduler.play_next_block())
+        with self.assertLogs("kindle_display.runtime.playlist_scheduler", "ERROR") as logs:
+            self.assertFalse(await scheduler.play_next_block())
+        self.assertIn("error_message=offline", logs.output[0])
         await self.publish("reddit", (self.page("reddit", 0, "new-0"), self.page("reddit", 1, "new-1")))
         self.assertTrue(await scheduler.play_next_block())
         self.assertEqual([record[1] for record in self.sink.records], ["old-0", "new-0", "new-1"])

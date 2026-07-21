@@ -98,11 +98,12 @@ class PlaylistScheduler:
                     self._force_full = True
                     self._recovery_task_id = task_id
                     self.logger.error(
-                        "display_failed task=%s page=%d/%d error_type=%s",
+                        "display_failed task=%s page=%d/%d error_type=%s error_message=%s",
                         task_id,
                         index,
                         len(page_set.pages),
                         type(error).__name__,
+                        str(error),
                     )
                     return False
                 self._current_page_hash = page_hash
